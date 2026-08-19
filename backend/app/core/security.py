@@ -32,7 +32,8 @@ def digest_token(token: str) -> str:
 
 
 def utc_now() -> datetime:
-    return datetime.now(UTC)
+    # MySQL DATETIME stores no timezone; persist and compare naive UTC values.
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def expires_after(seconds: int) -> datetime:

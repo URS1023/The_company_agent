@@ -8,6 +8,7 @@ import sys
 from sqlalchemy import select
 
 from backend.app.core.database import Base, SessionLocal, engine
+from backend.app.core.ids import new_id
 from backend.app.core.security import hash_password, utc_now
 from backend.app.models.identity import (
     AuthIdentity,
@@ -35,16 +36,20 @@ async def bootstrap(username: str, display_name: str, password: str) -> None:
         )
         if existing:
             raise ValueError("an account with this username already exists")
-        organization = Organization(name="默认组织", created_at=now)
-        workspace = Workspace(organization_id=organization.id, name="默认工作区", created_at=now)
-        user = User(display_name=display_name, created_at=now, updated_at=now)
+        organization = Organization(id=new_id(), name="默认组织", created_at=now)
+        workspace = Workspace(
+            id=new_id(), organization_id=organization.id, name="默认工作区", created_at=now
+        )
+        user = User(id=new_id(), display_name=display_name, created_at=now, updated_at=now)
         identity = AuthIdentity(
+            id=new_id(),
             user_id=user.id,
             provider="local",
             username_normalized=username.strip().lower(),
             created_at=now,
         )
         credential = LocalCredential(
+            id=new_id(),
             auth_identity_id=identity.id,
             password_hash=hash_password(password),
             must_change_password=False,
@@ -58,12 +63,14 @@ async def bootstrap(username: str, display_name: str, password: str) -> None:
                 identity,
                 credential,
                 OrganizationMember(
+                    id=new_id(),
                     organization_id=organization.id,
                     user_id=user.id,
                     role="admin",
                     created_at=now,
                 ),
                 WorkspaceMember(
+                    id=new_id(),
                     workspace_id=workspace.id,
                     user_id=user.id,
                     role="admin",
