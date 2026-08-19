@@ -9,16 +9,21 @@ from backend.app.core.ids import new_id
 from backend.app.core.secrets import SecretManager
 from backend.app.core.security import utc_now
 from backend.app.models.capabilities import (
+    CapabilityTestRun,
     Connector,
     ConnectorVersion,
     DataSource,
     Plugin,
+    PluginResourceBinding,
+    PluginSkillBinding,
+    PluginToolBinding,
     PluginVersion,
     SecretRecord,
     Skill,
     SkillVersion,
 )
 from backend.app.schemas.capabilities import (
+    CapabilityTestRunResponse,
     ConnectorResponse,
     ConnectorVersionResponse,
     CreateConnectorRequest,
@@ -27,6 +32,7 @@ from backend.app.schemas.capabilities import (
     CreateSecretRequest,
     CreateSkillRequest,
     DataSourceResponse,
+    PluginBindingRequest,
     PluginResponse,
     PluginVersionResponse,
     SecretResponse,
@@ -71,6 +77,21 @@ def _data_source(source) -> DataSourceResponse:
 
 async def _can_edit(owner_id: str, user_id: str, role: str) -> bool:
     return owner_id == user_id or role == "admin"
+
+
+async def _has_passed_test(
+    db: AsyncSession, workspace_id: str, resource_type: str, resource_version_id: str
+) -> bool:
+    return bool(
+        await db.scalar(
+            select(CapabilityTestRun.id).where(
+                CapabilityTestRun.workspace_id == workspace_id,
+                CapabilityTestRun.resource_type == resource_type,
+                CapabilityTestRun.resource_version_id == resource_version_id,
+                CapabilityTestRun.status == "passed",
+            )
+        )
+    )
 
 
 @router.post("/secrets", response_model=SecretResponse, status_code=status.HTTP_201_CREATED)
@@ -212,6 +233,11 @@ async def publish_skill_version(
         return _skill_version(version)
     if version.status != "draft":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有 Draft 可以发布")
+    if not await _has_passed_test(db, membership.workspace_id, "skill", version.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Skill 必须先通过 Test Run",
+        )
     version.status = "published"
     version.published_at = utc_now()
     skill.published_version_id = version.id
@@ -411,6 +437,11 @@ async def publish_connector_version(
         return _connector_version(version)
     if version.status != "draft":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有 Draft 可以发布")
+    if not await _has_passed_test(db, membership.workspace_id, "connector", version.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Connector 必须先通过 Test Run",
+        )
     version.status = "published"
     version.published_at = utc_now()
     connector.published_version_id = version.id
@@ -481,6 +512,11 @@ async def publish_plugin_version(
         return _plugin_version(version)
     if version.status != "draft":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有 Draft 可以发布")
+    if not await _has_passed_test(db, membership.workspace_id, "plugin", version.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Plugin 必须先通过 Test Run",
+        )
     version.status = "published"
     version.published_at = utc_now()
     plugin.published_version_id = version.id
@@ -535,6 +571,188 @@ async def clone_plugin(
     db.add_all([clone, clone_version])
     await db.commit()
     return _plugin(clone)
+
+
+async def _create_capability_test(
+    *,
+    db: AsyncSession,
+    workspace_id: str,
+    user_id: str,
+    resource_type: str,
+    resource_version_id: str,
+    spec: dict,
+) -> CapabilityTestRun:
+    now = utc_now()
+    status_value = "passed" if isinstance(spec, dict) else "failed"
+    output = {
+        "validated": status_value == "passed",
+        "spec_keys": sorted(spec.keys()) if isinstance(spec, dict) else [],
+    }
+    result = CapabilityTestRun(
+        id=new_id(),
+        workspace_id=workspace_id,
+        resource_type=resource_type,
+        resource_version_id=resource_version_id,
+        status=status_value,
+        input_json=spec if isinstance(spec, dict) else {},
+        output_json=output,
+        error_summary=None if status_value == "passed" else "Spec 必须是对象",
+        created_by=user_id,
+        created_at=now,
+    )
+    db.add(result)
+    await db.commit()
+    return result
+
+
+def _test_response(result: CapabilityTestRun) -> CapabilityTestRunResponse:
+    return CapabilityTestRunResponse.model_validate(result, from_attributes=True)
+
+
+@router.post("/skill-versions/{version_id}/test-runs", response_model=CapabilityTestRunResponse)
+async def test_skill_version(
+    version_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> CapabilityTestRunResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    version = await db.get(SkillVersion, version_id)
+    skill = await db.get(Skill, version.skill_id) if version else None
+    if not version or not skill or skill.workspace_id != membership.workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill Version 不存在")
+    if skill.owner_user_id != user.id and membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无 Test Run 权限")
+    result = await _create_capability_test(
+        db=db,
+        workspace_id=membership.workspace_id,
+        user_id=user.id,
+        resource_type="skill",
+        resource_version_id=version.id,
+        spec=version.spec,
+    )
+    return _test_response(result)
+
+
+@router.post("/connector-versions/{version_id}/test-runs", response_model=CapabilityTestRunResponse)
+async def test_connector_version(
+    version_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> CapabilityTestRunResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    version = await db.get(ConnectorVersion, version_id)
+    connector = await db.get(Connector, version.connector_id) if version else None
+    if not version or not connector or connector.workspace_id != membership.workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connector Version 不存在",
+        )
+    if connector.owner_user_id != user.id and membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无 Test Run 权限")
+    result = await _create_capability_test(
+        db=db,
+        workspace_id=membership.workspace_id,
+        user_id=user.id,
+        resource_type="connector",
+        resource_version_id=version.id,
+        spec=version.spec,
+    )
+    return _test_response(result)
+
+
+@router.post("/plugin-versions/{version_id}/test-runs", response_model=CapabilityTestRunResponse)
+async def test_plugin_version(
+    version_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> CapabilityTestRunResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    version = await db.get(PluginVersion, version_id)
+    plugin = await db.get(Plugin, version.plugin_id) if version else None
+    if not version or not plugin or plugin.workspace_id != membership.workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin Version 不存在")
+    if plugin.owner_user_id != user.id and membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无 Test Run 权限")
+    result = await _create_capability_test(
+        db=db,
+        workspace_id=membership.workspace_id,
+        user_id=user.id,
+        resource_type="plugin",
+        resource_version_id=version.id,
+        spec=version.spec,
+    )
+    return _test_response(result)
+
+
+@router.post("/plugin-versions/{version_id}/bindings", status_code=status.HTTP_204_NO_CONTENT)
+async def bind_plugin_version(
+    version_id: str,
+    payload: PluginBindingRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    user, _, _, membership = await current_user_context(request, db)
+    version = await db.get(PluginVersion, version_id)
+    plugin = await db.get(Plugin, version.plugin_id) if version else None
+    if not version or not plugin or plugin.workspace_id != membership.workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin Version 不存在")
+    if version.status != "draft":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有 Draft 可以修改绑定")
+    if plugin.owner_user_id != user.id and membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无绑定权限")
+    skills = list(
+        await db.scalars(
+            select(SkillVersion)
+            .join(Skill)
+            .where(
+                SkillVersion.id.in_(payload.skill_version_ids),
+                Skill.workspace_id == membership.workspace_id,
+            )
+        )
+    )
+    connectors = list(
+        await db.scalars(
+            select(ConnectorVersion)
+            .join(Connector)
+            .where(
+                ConnectorVersion.id.in_(payload.connector_version_ids),
+                Connector.workspace_id == membership.workspace_id,
+            )
+        )
+    )
+    if len(skills) != len(set(payload.skill_version_ids)) or len(connectors) != len(
+        set(payload.connector_version_ids)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="绑定对象不存在或不属于当前 Workspace",
+        )
+    for skill_version in skills:
+        db.add(
+            PluginSkillBinding(
+                id=new_id(), plugin_version_id=version.id, skill_version_id=skill_version.id
+            )
+        )
+    for connector_version in connectors:
+        db.add(
+            PluginToolBinding(
+                id=new_id(),
+                plugin_version_id=version.id,
+                connector_version_id=connector_version.id,
+            )
+        )
+    for resource in payload.resources:
+        resource_type = resource.get("type")
+        resource_id = resource.get("id")
+        if not resource_type or not resource_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Resource binding 缺少 type/id",
+            )
+        db.add(
+            PluginResourceBinding(
+                id=new_id(),
+                plugin_version_id=version.id,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                config={},
+            )
+        )
+    await db.commit()
 
 
 __all__ = ["router"]

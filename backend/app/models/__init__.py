@@ -2,6 +2,7 @@
 
 from backend.app.models.capabilities import (
     Artifact,
+    CapabilityTestRun,
     Connector,
     ConnectorVersion,
     DataSource,
@@ -31,6 +32,7 @@ from backend.app.models.runtime import Conversation, Message, OutboxEvent, Run, 
 __all__ = [
     "AuthIdentity",
     "Artifact",
+    "CapabilityTestRun",
     "Conversation",
     "Connector",
     "ConnectorVersion",

@@ -61,6 +61,8 @@ def test_skill_publish_is_versioned_and_plugin_can_clone(client, db_session, adm
         )
 
     skill_version = asyncio.get_event_loop().run_until_complete(read_skill_version())
+    assert client.post(f"/api/v1/skill-versions/{skill_version.id}/publish").status_code == 409
+    assert client.post(f"/api/v1/skill-versions/{skill_version.id}/test-runs").status_code == 200
     published = client.post(f"/api/v1/skill-versions/{skill_version.id}/publish")
     assert published.status_code == 200
     assert published.json()["status"] == "published"
@@ -82,6 +84,12 @@ def test_skill_publish_is_versioned_and_plugin_can_clone(client, db_session, adm
         )
 
     plugin_version = asyncio.get_event_loop().run_until_complete(read_plugin_version())
+    binding = client.post(
+        f"/api/v1/plugin-versions/{plugin_version.id}/bindings",
+        json={"skill_version_ids": [skill_version.id]},
+    )
+    assert binding.status_code == 204
+    assert client.post(f"/api/v1/plugin-versions/{plugin_version.id}/test-runs").status_code == 200
     assert client.post(f"/api/v1/plugin-versions/{plugin_version.id}/publish").status_code == 200
     clone = client.post(f"/api/v1/plugins/{plugin_id}/clone")
     assert clone.status_code == 201
@@ -108,6 +116,7 @@ def test_connector_publish_requires_admin_and_keeps_spec(client, db_session, adm
         )
 
     version = asyncio.get_event_loop().run_until_complete(read_connector_version())
+    assert client.post(f"/api/v1/connector-versions/{version.id}/test-runs").status_code == 200
     published = client.post(f"/api/v1/connector-versions/{version.id}/publish")
     assert published.status_code == 200
     assert published.json()["spec"]["method"] == "GET"

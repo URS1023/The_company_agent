@@ -129,6 +129,26 @@ class ToolTestResponse(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class VersionSpecRequest(BaseModel):
+    spec: dict = Field(default_factory=dict)
+
+
+class CapabilityTestRunResponse(BaseModel):
+    id: str
+    resource_type: str
+    resource_version_id: str
+    status: str
+    output_json: dict
+    error_summary: str | None
+    created_at: datetime
+
+
+class PluginBindingRequest(BaseModel):
+    skill_version_ids: list[str] = Field(default_factory=list)
+    connector_version_ids: list[str] = Field(default_factory=list)
+    resources: list[dict[str, str]] = Field(default_factory=list)
+
+
 __all__ = [
     "ConnectorResponse",
     "ConnectorVersionResponse",
@@ -145,4 +165,7 @@ __all__ = [
     "SkillVersionResponse",
     "ToolInvocationRequest",
     "ToolTestResponse",
+    "VersionSpecRequest",
+    "CapabilityTestRunResponse",
+    "PluginBindingRequest",
 ]

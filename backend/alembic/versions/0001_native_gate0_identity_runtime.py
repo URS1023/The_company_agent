@@ -387,10 +387,25 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Index("ix_artifacts_workspace_id_created_at", "workspace_id", "created_at"),
     )
+    op.create_table(
+        "test_runs",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("resource_type", sa.String(32), nullable=False),
+        sa.Column("resource_version_id", sa.String(26), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("input_json", sa.JSON, nullable=False),
+        sa.Column("output_json", sa.JSON, nullable=False),
+        sa.Column("error_summary", sa.Text),
+        sa.Column("created_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_test_runs_workspace_id_created_at", "workspace_id", "created_at"),
+    )
 
 
 def downgrade() -> None:
     for table in [
+        "test_runs",
         "artifacts",
         "plugin_version_resource_bindings",
         "plugin_version_tool_bindings",

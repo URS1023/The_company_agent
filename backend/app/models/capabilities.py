@@ -168,6 +168,22 @@ class PluginResourceBinding(Base):
     config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
 
+class CapabilityTestRun(Base):
+    __tablename__ = "test_runs"
+    __table_args__ = (Index("ix_test_runs_workspace_id_created_at", "workspace_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_version_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    output_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    error_summary: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Artifact(Base):
     __tablename__ = "artifacts"
     __table_args__ = (Index("ix_artifacts_workspace_id_created_at", "workspace_id", "created_at"),)
