@@ -729,6 +729,7 @@ async def update_data_source(
         select(DataSource).where(
             DataSource.id == source_id,
             DataSource.workspace_id == membership.workspace_id,
+            DataSource.status != "archived",
         )
     )
     if not source or (source.owner_user_id != user.id and membership.role != "admin"):
@@ -781,6 +782,7 @@ async def delete_data_source(
         select(DataSource).where(
             DataSource.id == source_id,
             DataSource.workspace_id == membership.workspace_id,
+            DataSource.status != "archived",
         )
     )
     if not source or (source.owner_user_id != user.id and membership.role != "admin"):
@@ -811,6 +813,7 @@ async def list_data_sources(
             (DataSource.owner_user_id == user.id)
             | (DataSource.visibility == "workspace")
             | (membership.role == "admin"),
+            DataSource.status != "archived",
         )
     )
     return [_data_source(row) for row in rows]
@@ -936,6 +939,7 @@ async def test_source_connection(
         select(DataSource).where(
             DataSource.id == source_id,
             DataSource.workspace_id == membership.workspace_id,
+            DataSource.status != "archived",
         )
     )
     if not source:
@@ -974,6 +978,7 @@ async def invoke_data_source_tool(
         select(DataSource).where(
             DataSource.id == source_id,
             DataSource.workspace_id == membership.workspace_id,
+            DataSource.status != "archived",
         )
     )
     if not source:
@@ -1348,6 +1353,7 @@ async def list_plugin_versions(
             (Plugin.owner_user_id == user.id)
             | (Plugin.visibility == "workspace")
             | (membership.role == "admin"),
+            Plugin.status == "active",
         )
     )
     if not plugin:
@@ -1699,6 +1705,7 @@ async def clone_plugin(
             (Plugin.owner_user_id == user.id)
             | (Plugin.visibility == "workspace")
             | (membership.role == "admin"),
+            Plugin.status == "active",
         )
     )
     if not source:

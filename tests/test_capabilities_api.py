@@ -217,6 +217,7 @@ def test_data_source_rejects_inline_credentials_and_accepts_secret_reference(
     )
     assert tool_call.status_code == 422
     assert client.delete(f"/api/v1/data-sources/{source_id}").status_code == 204
+    assert source_id not in {item["id"] for item in client.get("/api/v1/data-sources").json()}
     postgres = client.post(
         "/api/v1/data-sources",
         json={

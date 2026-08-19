@@ -168,6 +168,7 @@ async def create_run(
                     (DataSource.owner_user_id == user.id)
                     | (DataSource.visibility == "workspace")
                     | (membership.role == "admin"),
+                    DataSource.status != "archived",
                 )
             )
         )
