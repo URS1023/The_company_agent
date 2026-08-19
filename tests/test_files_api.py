@@ -61,5 +61,9 @@ def test_file_upload_supports_batch_and_rejects_unknown_formats(
             "/api/v1/files", files={"upload": ("malware.exe", b"x", "application/octet-stream")}
         )
         assert rejected.status_code == 415
+        bad_magic = client.post(
+            "/api/v1/files", files={"upload": ("not-a-pdf.pdf", b"plain text", "application/pdf")}
+        )
+        assert bad_magic.status_code == 415
     finally:
         settings.local_storage_root = original_root

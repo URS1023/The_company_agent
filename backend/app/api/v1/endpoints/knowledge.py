@@ -42,7 +42,9 @@ async def list_knowledge_bases(
         select(KnowledgeBase)
         .where(
             KnowledgeBase.workspace_id == membership.workspace_id,
-            (KnowledgeBase.owner_user_id == user.id) | (KnowledgeBase.visibility == "workspace"),
+            (KnowledgeBase.owner_user_id == user.id)
+            | (KnowledgeBase.visibility == "workspace")
+            | (membership.role == "admin"),
             KnowledgeBase.status == "active",
         )
         .order_by(KnowledgeBase.updated_at.desc())
@@ -181,7 +183,9 @@ async def add_document(
         select(KnowledgeBase).where(
             KnowledgeBase.id == knowledge_base_id,
             KnowledgeBase.workspace_id == membership.workspace_id,
-            (KnowledgeBase.owner_user_id == user.id) | (KnowledgeBase.visibility == "workspace"),
+            (KnowledgeBase.owner_user_id == user.id)
+            | (KnowledgeBase.visibility == "workspace")
+            | (membership.role == "admin"),
         )
     )
     file_asset = await db.scalar(
@@ -255,7 +259,9 @@ async def list_documents(
         select(KnowledgeBase).where(
             KnowledgeBase.id == knowledge_base_id,
             KnowledgeBase.workspace_id == membership.workspace_id,
-            (KnowledgeBase.owner_user_id == user.id) | (KnowledgeBase.visibility == "workspace"),
+            (KnowledgeBase.owner_user_id == user.id)
+            | (KnowledgeBase.visibility == "workspace")
+            | (membership.role == "admin"),
         )
     )
     if not base:
@@ -387,7 +393,9 @@ async def search_knowledge(
         select(KnowledgeBase).where(
             KnowledgeBase.id == knowledge_base_id,
             KnowledgeBase.workspace_id == membership.workspace_id,
-            (KnowledgeBase.owner_user_id == user.id) | (KnowledgeBase.visibility == "workspace"),
+            (KnowledgeBase.owner_user_id == user.id)
+            | (KnowledgeBase.visibility == "workspace")
+            | (membership.role == "admin"),
         )
     )
     if not base:

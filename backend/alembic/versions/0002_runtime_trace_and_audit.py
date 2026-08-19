@@ -14,8 +14,21 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column(
         "run_events",
-        sa.Column("sequence", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("sequence", sa.Integer(), nullable=True),
     )
+    op.execute(
+        """
+        UPDATE run_events AS target
+        JOIN (
+            SELECT id, seq FROM (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY run_id ORDER BY id) AS seq
+                FROM run_events
+            ) AS ranked
+        ) AS ordered ON ordered.id = target.id
+        SET target.sequence = ordered.seq
+        """
+    )
+    op.alter_column("run_events", "sequence", existing_type=sa.Integer(), nullable=False)
     op.create_unique_constraint(
         "uq_run_events_run_id_sequence", "run_events", ["run_id", "sequence"]
     )
@@ -126,10 +139,25 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Index("ix_audit_logs_workspace_id_created_at", "workspace_id", "created_at"),
     )
+    op.create_table(
+        "artifact_lineage",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("artifact_id", sa.String(26), sa.ForeignKey("artifacts.id"), nullable=False),
+        sa.Column(
+            "parent_artifact_id", sa.String(26), sa.ForeignKey("artifacts.id"), nullable=False
+        ),
+        sa.Column("relation", sa.String(64), nullable=False),
+        sa.Column("metadata_json", sa.JSON(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint("artifact_id", "parent_artifact_id", "relation"),
+        sa.Index("ix_artifact_lineage_artifact_id", "artifact_id"),
+    )
 
 
 def downgrade() -> None:
     for table in [
+        "artifact_lineage",
         "audit_logs",
         "citations",
         "model_calls",

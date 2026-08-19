@@ -71,6 +71,43 @@ async def ingest_document(document_id: str) -> None:
                 parsed_text = response.text or ""
             else:
                 parsed_text = parse_document(raw, file_asset.name, file_asset.mime_type).text
+                if (
+                    not parsed_text.strip()
+                    and file_asset.name.lower().endswith(".pdf")
+                    and settings.allow_external_vision
+                    and settings.siliconflow_api_key
+                ):
+                    import fitz
+
+                    page_texts: list[str] = []
+                    with fitz.open(stream=raw, filetype="pdf") as pdf:
+                        for page in list(pdf)[:20]:
+                            pixmap = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                            encoded = base64.b64encode(pixmap.tobytes("png")).decode()
+                            vision_response = await siliconflow_client().chat(
+                                model=settings.siliconflow_vision_model,
+                                messages=[
+                                    {
+                                        "role": "user",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "请提取扫描页中的文字和表格，不能臆测。",
+                                            },
+                                            {
+                                                "type": "image_url",
+                                                "image_url": {
+                                                    "url": f"data:image/png;base64,{encoded}"
+                                                },
+                                            },
+                                        ],
+                                    }
+                                ],
+                                enable_thinking=False,
+                            )
+                            if vision_response.text:
+                                page_texts.append(vision_response.text)
+                    parsed_text = "\n\n".join(page_texts)
             chunks = chunk_text(parsed_text)
             if not chunks:
                 document.status = "failed"

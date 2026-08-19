@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import httpx
+
 from backend.app.core.secrets import SecretManager
 from backend.app.models.capabilities import ConnectorVersion, DataSource, SecretRecord
 from backend.app.tools.database import (
@@ -10,7 +12,7 @@ from backend.app.tools.database import (
     validate_read_only_sql,
 )
 from backend.app.tools.gateway import normalize_result, validate_arguments
-from backend.app.tools.http import invoke
+from backend.app.tools.http import invoke, validate_target
 
 
 class ConnectorTestError(RuntimeError):
@@ -40,6 +42,18 @@ async def test_http_connector(
             headers["Authorization"] = f"Basic {token}"
         elif secret_values.get("token"):
             headers["Authorization"] = f"Bearer {secret_values['token']}"
+        elif auth_type in {"oauth2", "oauth2_client_credentials"}:
+            token_url = validate_target(
+                str(spec.get("token_url", "")),
+                allow_private=bool(spec.get("allow_private", False)),
+            )
+            token_response = await _oauth_client_credentials_token(
+                token_url,
+                client_id=str(secret_values.get("client_id", "")),
+                client_secret=str(secret_values.get("client_secret", "")),
+                scope=str(spec.get("scope", "")),
+            )
+            headers["Authorization"] = f"Bearer {token_response}"
     result = await invoke(
         base_url=str(spec.get("base_url", "")),
         path=str(spec.get("path", "")),
@@ -51,6 +65,28 @@ async def test_http_connector(
         timeout=min(float(spec.get("timeout_seconds", 30)), 120),
     )
     return normalize_result(result)
+
+
+async def _oauth_client_credentials_token(
+    token_url: str, *, client_id: str, client_secret: str, scope: str = ""
+) -> str:
+    if not client_id or not client_secret:
+        raise ConnectorTestError("OAuth2 Secret 必须包含 client_id 和 client_secret")
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    if scope:
+        data["scope"] = scope
+    async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        response = await client.post(token_url, data=data)
+    if response.is_error:
+        raise ConnectorTestError(f"OAuth2 token endpoint returned HTTP {response.status_code}")
+    token = response.json().get("access_token")
+    if not isinstance(token, str) or not token:
+        raise ConnectorTestError("OAuth2 token response 缺少 access_token")
+    return token
 
 
 async def test_database_connection(source: DataSource, secret: SecretRecord | None) -> dict:

@@ -40,6 +40,17 @@ def test_conversation_and_run_create_persists_event_and_outbox(
     assert any(event.event_type == "run.created" for event in events)
     assert any(item.payload["run_id"] == run_id for item in outbox)
 
+    async def finish_for_stream_test():
+        persisted_run = await db_session.get(Run, run_id)
+        persisted_run.status = "completed"
+        await db_session.commit()
+
+    asyncio.get_event_loop().run_until_complete(finish_for_stream_test())
+    with client.stream("GET", f"/api/v1/runs/{run_id}/events") as events_response:
+        assert events_response.status_code == 200
+        first_chunk = next(events_response.iter_text())
+        assert "run.created" in first_chunk
+
     proposal = client.post(f"/api/v1/runs/{run_id}/capability-proposals")
     assert proposal.status_code == 200
     assert proposal.json()["capability_type"] == "skill"

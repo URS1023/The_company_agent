@@ -35,3 +35,53 @@ def test_state_changing_cross_origin_request_is_rejected() -> None:
         json={"username": "admin", "password": "irrelevant"},
     )
     assert response.status_code == 403
+
+
+def test_ready_endpoint_reports_dependency_status_without_crashing(client, monkeypatch) -> None:
+    async def ok_ping():
+        return True, "ok"
+
+    import backend.app.api.v1.endpoints.health as health_endpoint
+
+    monkeypatch.setattr(health_endpoint, "database_ping", ok_ping)
+    monkeypatch.setattr(health_endpoint, "redis_ping", ok_ping)
+    monkeypatch.setattr(health_endpoint, "elasticsearch_ping", ok_ping)
+    response = client.get("/api/v1/health/ready")
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+
+
+def test_admin_model_probe_unknown_profile_is_rejected(client, admin_seed) -> None:
+    assert (
+        client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"}
+        ).status_code
+        == 200
+    )
+    response = client.post("/api/v1/admin/model-profiles/unknown/probe")
+    assert response.status_code == 404
+
+
+def test_admin_model_probe_records_success_without_exposing_key(
+    client, admin_seed, monkeypatch
+) -> None:
+    class FakeResponse:
+        text = "OK"
+
+    class FakeClient:
+        async def chat(self, **kwargs):
+            return FakeResponse()
+
+    import backend.app.api.v1.endpoints.admin as admin_endpoint
+
+    monkeypatch.setattr(admin_endpoint, "agnes_client", lambda: FakeClient())
+    assert (
+        client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"}
+        ).status_code
+        == 200
+    )
+    response = client.post("/api/v1/admin/model-profiles/reasoning/probe")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert "api_key" not in response.text

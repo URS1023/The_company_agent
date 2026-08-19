@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import socket
+import time
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -197,13 +199,16 @@ async def dispatch_builtin(tool_version: ToolVersion, arguments: dict) -> dict:
 
 async def dispatch_tool(db, run: Run, tool_version: ToolVersion, arguments: dict) -> dict:
     spec = tool_version.spec or {}
+    source_metadata = {key: value for key, value in arguments.items() if key.startswith("__")}
+    business_arguments = {
+        key: value for key, value in arguments.items() if not key.startswith("__")
+    }
     arguments = compile_arguments(
-        arguments,
+        business_arguments,
         spec.get("input_schema") or {"type": "object"},
         defaults=spec.get("defaults") or {},
     )
-    validate_source_policy(arguments, spec.get("field_source_policy"))
-    arguments = {key: value for key, value in arguments.items() if not key.startswith("__")}
+    validate_source_policy({**arguments, **source_metadata}, spec.get("field_source_policy"))
     connector_version = await db.get(ConnectorVersion, tool_version.connector_version_id)
     connector = (
         await db.get(Connector, connector_version.connector_id) if connector_version else None
@@ -212,7 +217,11 @@ async def dispatch_tool(db, run: Run, tool_version: ToolVersion, arguments: dict
     if provider == "builtin":
         return await dispatch_builtin(tool_version, arguments)
     if provider == "sandbox":
-        return await run_trusted_sandbox(str(spec.get("operation", "")), arguments)
+        return await run_trusted_sandbox(
+            str(spec.get("operation", "")),
+            arguments,
+            workdir=Path(settings.local_storage_root) / "runs" / run.id,
+        )
     if provider == "http":
         if not connector_version:
             raise ValueError("connector version not found")
@@ -244,7 +253,13 @@ async def dispatch_tool(db, run: Run, tool_version: ToolVersion, arguments: dict
         secret = await load_secret(db, secret_id, run.workspace_id)
         client = StreamableHttpMcpClient(endpoint, headers=secret_headers(secret, spec))
         await client.initialize()
-        return await client.call_tool(str(spec.get("name", tool_version.id)), arguments)
+        result = await client.call_tool(str(spec.get("name", tool_version.id)), arguments)
+        return {
+            "status": "success",
+            "data": result,
+            "artifacts": [],
+            "metadata": {"provider": "mcp"},
+        }
     raise ValueError(f"native worker does not support provider {provider}")
 
 
@@ -304,8 +319,11 @@ async def execute_run(run_id: str) -> None:
             answer = ""
             streamed_answer = False
             model_usage: dict[str, int] = {"calls": 0}
+            started_monotonic = time.monotonic()
             if tool_definitions:
-                for _ in range(8):
+                for _ in range(12):
+                    if time.monotonic() - started_monotonic > 20 * 60:
+                        raise RuntimeError("RUN_TIMEOUT")
                     if (await db.get(Run, run.id)).status == "cancelled":
                         return
                     model_call = ModelCall(
@@ -320,11 +338,18 @@ async def execute_run(run_id: str) -> None:
                     )
                     db.add(model_call)
                     await db.commit()
-                    response = await client.chat(
-                        profile="reasoning",
-                        messages=messages,
-                        tools=tool_definitions,
-                    )
+                    try:
+                        response = await client.chat(
+                            profile="reasoning",
+                            messages=messages,
+                            tools=tool_definitions,
+                        )
+                    except Exception as model_exc:
+                        model_call.status = "failed"
+                        model_call.error_code = type(model_exc).__name__
+                        model_call.completed_at = utc_now()
+                        await db.commit()
+                        raise
                     model_call.status = "completed"
                     model_call.completed_at = utc_now()
                     usage = response.raw.get("usage") if isinstance(response.raw, dict) else None
@@ -462,19 +487,26 @@ async def execute_run(run_id: str) -> None:
                 )
                 db.add(model_call)
                 await db.commit()
-                async for text in client.stream_chat(
-                    profile="reasoning",
-                    messages=messages,
-                ):
-                    chunks.append(text)
-                    await append_run_event(
-                        db,
-                        workspace_id=run.workspace_id,
-                        run_id=run.id,
-                        event_type="message.delta",
-                        payload={"text": text},
-                    )
+                try:
+                    async for text in client.stream_chat(
+                        profile="reasoning",
+                        messages=messages,
+                    ):
+                        chunks.append(text)
+                        await append_run_event(
+                            db,
+                            workspace_id=run.workspace_id,
+                            run_id=run.id,
+                            event_type="message.delta",
+                            payload={"text": text},
+                        )
+                        await db.commit()
+                except Exception as model_exc:
+                    model_call.status = "failed"
+                    model_call.error_code = type(model_exc).__name__
+                    model_call.completed_at = utc_now()
                     await db.commit()
+                    raise
                 answer = "".join(chunks)
                 model_call.status = "completed"
                 model_call.completed_at = utc_now()

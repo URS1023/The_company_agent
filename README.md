@@ -14,7 +14,7 @@
 - 开发期向量检索：本机 Elasticsearch
 - 开发期任务流：MySQL Outbox + Redis Streams
 
-native-dev 只开放仓库内经过测试的确定性分析器；完整安全 Sandbox、隔离 stdio MCP 和 LibreOffice 预览属于后续发布闸门，当前不会开放任意用户代码执行。
+native-dev 只开放仓库内经过测试的确定性分析器和受限的 `python.safe` 数据变换（无 import、文件、网络和任意主机访问）；完整安全 Sandbox、隔离 stdio MCP 和 LibreOffice 预览属于后续发布闸门，当前不会开放任意用户代码执行。
 
 ## Native 开发启动
 

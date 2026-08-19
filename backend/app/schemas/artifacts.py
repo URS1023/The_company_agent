@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ArtifactResponse(BaseModel):
@@ -13,6 +13,10 @@ class ArtifactResponse(BaseModel):
     mime_type: str
     size: int
     status: str
+    external_url: str | None = None
+    sha256: str | None = None
+    parent_artifact_id: str | None = None
+    metadata_json: dict = Field(default_factory=dict)
     created_at: datetime
 
 

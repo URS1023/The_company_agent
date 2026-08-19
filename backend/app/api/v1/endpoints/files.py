@@ -44,6 +44,20 @@ def _safe_name(value: str | None) -> str:
     return candidate[:240] or "upload.bin"
 
 
+def _validate_magic(suffix: str, content: bytes) -> bool:
+    if suffix == ".pdf":
+        return content.startswith(b"%PDF-")
+    if suffix in {".docx", ".xlsx", ".xlsm", ".pptx"}:
+        return content.startswith(b"PK\x03\x04")
+    if suffix == ".png":
+        return content.startswith(b"\x89PNG\r\n\x1a\n")
+    if suffix in {".jpg", ".jpeg"}:
+        return content.startswith(b"\xff\xd8\xff")
+    if suffix == ".webp":
+        return content[:4] == b"RIFF" and content[8:12] == b"WEBP"
+    return True
+
+
 def _response(file: FileAsset) -> FileResponse:
     return FileResponse.model_validate(file, from_attributes=True)
 
@@ -74,6 +88,11 @@ async def upload_file(
     if suffix in {".png", ".jpg", ".jpeg", ".webp"} and not content_type.startswith("image/"):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="图片 MIME 类型不正确"
+        )
+    if not _validate_magic(suffix, content):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="文件内容与扩展名不匹配",
         )
     storage_key = f"workspaces/{membership.workspace_id}/files/{file_id}/{name}"
     try:

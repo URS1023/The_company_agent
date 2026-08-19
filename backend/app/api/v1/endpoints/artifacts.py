@@ -16,6 +16,7 @@ from backend.app.schemas.artifacts import (
     ArtifactPreviewResponse,
     ArtifactResponse,
 )
+from backend.app.services.audit import record_audit
 from backend.app.services.auth import current_user_context
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
@@ -31,7 +32,7 @@ async def _authorized_artifact(artifact_id: str, request: Request, db: AsyncSess
         select(Artifact).where(
             Artifact.id == artifact_id,
             Artifact.workspace_id == membership.workspace_id,
-            Artifact.owner_user_id == user.id,
+            (Artifact.owner_user_id == user.id) | (membership.role == "admin"),
             Artifact.status != "deleted",
         )
     )
@@ -49,7 +50,7 @@ async def list_artifacts(
         select(Artifact)
         .where(
             Artifact.workspace_id == membership.workspace_id,
-            Artifact.owner_user_id == user.id,
+            (Artifact.owner_user_id == user.id) | (membership.role == "admin"),
             Artifact.status != "deleted",
         )
         .order_by(Artifact.created_at.desc())
@@ -121,6 +122,16 @@ async def use_artifact_as_input(
     """
 
     artifact = await _authorized_artifact(artifact_id, request, db)
+    user, _, _, membership = await current_user_context(request, db)
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="artifact.used_as_input",
+        resource_type="artifact",
+        resource_id=artifact.id,
+    )
+    await db.commit()
     return ArtifactInputResponse(
         artifact_id=artifact.id,
         name=artifact.name,

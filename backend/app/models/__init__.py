@@ -2,6 +2,7 @@
 
 from backend.app.models.capabilities import (
     Artifact,
+    ArtifactLineage,
     CapabilityTestRun,
     Connector,
     ConnectorToolBinding,
@@ -48,6 +49,7 @@ __all__ = [
     "AuthIdentity",
     "AuditLog",
     "Artifact",
+    "ArtifactLineage",
     "CapabilityTestRun",
     "Citation",
     "Conversation",

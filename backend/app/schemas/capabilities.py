@@ -27,6 +27,13 @@ class CreateSkillRequest(BaseModel):
     spec: dict = Field(default_factory=dict)
 
 
+class UpdateSkillRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    visibility: str | None = Field(default=None, pattern="^(private|workspace)$")
+    spec: dict | None = None
+
+
 class SkillResponse(BaseModel):
     id: str
     name: str
@@ -97,6 +104,13 @@ class CreatePluginRequest(BaseModel):
     spec: dict = Field(default_factory=dict)
 
 
+class UpdatePluginRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    visibility: str | None = Field(default=None, pattern="^(private|workspace)$")
+    spec: dict | None = None
+
+
 class PluginResponse(BaseModel):
     id: str
     name: str
@@ -124,6 +138,13 @@ class CreateDataSourceRequest(BaseModel):
     connection_config: dict[str, str] = Field(default_factory=dict)
     secret_id: str | None = None
     visibility: str = Field(default="workspace", pattern="^(private|workspace)$")
+
+
+class UpdateDataSourceRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    connection_config: dict[str, str] | None = None
+    secret_id: str | None = None
+    visibility: str | None = Field(default=None, pattern="^(private|workspace)$")
 
 
 class DataSourceResponse(BaseModel):
@@ -216,9 +237,12 @@ __all__ = [
     "ConnectorBuilderRequest",
     "ConnectorBuilderResponse",
     "CreateDataSourceRequest",
+    "UpdateDataSourceRequest",
     "CreatePluginRequest",
+    "UpdatePluginRequest",
     "CreateSecretRequest",
     "CreateSkillRequest",
+    "UpdateSkillRequest",
     "DataSourceResponse",
     "PluginResponse",
     "PluginVersionResponse",

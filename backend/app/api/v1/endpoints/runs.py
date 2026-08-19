@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.database import SessionLocal, get_db
+from backend.app.core.database import get_db
 from backend.app.core.ids import new_id
 from backend.app.core.security import utc_now
 from backend.app.models.capabilities import (
@@ -638,46 +638,63 @@ async def run_events(
     run_id: str, request: Request, db: AsyncSession = Depends(get_db)
 ) -> StreamingResponse:
     run, workspace_id = await _owned_run(run_id, request, db)
+    stream_run_id = run.id
     last_event_id = request.headers.get("last-event-id") or request.query_params.get("after")
     cursor = int(last_event_id or 0)
 
     async def stream() -> AsyncIterator[str]:
         nonlocal cursor
         started = time.monotonic()
-        while time.monotonic() - started < 900:
-            async with SessionLocal() as stream_db:
+        try:
+            while time.monotonic() - started < 900:
                 rows = list(
-                    await stream_db.scalars(
+                    await db.scalars(
                         select(RunEvent)
                         .where(
-                            RunEvent.run_id == run.id,
+                            RunEvent.run_id == stream_run_id,
                             RunEvent.workspace_id == workspace_id,
                             RunEvent.id > cursor,
                         )
                         .order_by(RunEvent.id)
                     )
                 )
-                current = await stream_db.get(Run, run.id)
-            emitted = False
-            for event in rows:
-                cursor = event.id
-                emitted = True
-                body = {
-                    "id": event.id,
-                    "sequence": event.sequence,
-                    "schema_version": 1,
-                    "event": event.event_type,
-                    "run_id": event.run_id,
-                    "payload": event.payload,
-                    "created_at": event.created_at.isoformat(),
-                }
-                serialized = json.dumps(body, ensure_ascii=False)
-                yield f"id: {event.id}\nevent: {event.event_type}\ndata: {serialized}\n\n"
-            if not emitted:
-                yield ": heartbeat\n\n"
-            if current and current.status in {"completed", "failed", "cancelled"} and not emitted:
-                break
-            await asyncio.sleep(0.5)
+                current = await db.get(Run, stream_run_id)
+                event_rows = [
+                    {
+                        "id": event.id,
+                        "sequence": event.sequence,
+                        "event_type": event.event_type,
+                        "run_id": event.run_id,
+                        "payload": event.payload,
+                        "created_at": event.created_at.isoformat(),
+                    }
+                    for event in rows
+                ]
+                current_status = current.status if current else None
+                # SSE polling must not hold an open read transaction between ticks.
+                await db.rollback()
+                emitted = False
+                for event in event_rows:
+                    cursor = event["id"]
+                    emitted = True
+                    body = {
+                        "id": event["id"],
+                        "sequence": event["sequence"],
+                        "schema_version": 1,
+                        "event": event["event_type"],
+                        "run_id": event["run_id"],
+                        "payload": event["payload"],
+                        "created_at": event["created_at"],
+                    }
+                    serialized = json.dumps(body, ensure_ascii=False)
+                    yield f"id: {event['id']}\nevent: {event['event_type']}\ndata: {serialized}\n\n"
+                if not emitted:
+                    yield ": heartbeat\n\n"
+                if current_status in {"completed", "failed", "cancelled"} and not emitted:
+                    break
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            return
 
     return StreamingResponse(
         stream(),

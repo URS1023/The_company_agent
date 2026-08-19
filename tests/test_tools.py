@@ -12,9 +12,9 @@ from backend.app.tools.gateway import (
     validate_arguments,
     validate_source_policy,
 )
-from backend.app.tools.http import HttpConnectorError, invoke, validate_target
+from backend.app.tools.http import HttpConnectorError, HttpResult, invoke, validate_target
 from backend.app.tools.mcp import StreamableHttpMcpClient
-from backend.app.tools.sandbox import SandboxError, run_trusted_sandbox
+from backend.app.tools.sandbox import SandboxError, run_safe_python, run_trusted_sandbox
 
 
 def test_read_only_sql_accepts_select_and_rejects_side_effects() -> None:
@@ -68,6 +68,16 @@ def test_gateway_validates_json_schema() -> None:
         )
 
 
+def test_result_normalizer_exposes_artifact_references() -> None:
+    from backend.app.tools.gateway import normalize_result
+
+    normalized = normalize_result(
+        HttpResult(200, {}, {"url": "https://example.test/report.pptx", "type": "presentation"})
+    )
+    assert normalized["status"] == "success"
+    assert normalized["artifacts"][0]["type"] == "presentation"
+
+
 @pytest.mark.asyncio
 async def test_mcp_streamable_http_json_rpc_round_trip() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -108,6 +118,13 @@ async def test_native_sandbox_allows_trusted_analyzer_but_rejects_arbitrary_code
     assert result["summary"]["profit"] == 6.0
     with pytest.raises(SandboxError, match="ARBITRARY_PYTHON_DISABLED"):
         await run_trusted_sandbox("python.execute", {"code": "print(1)"})
+    safe = await run_safe_python(
+        "result = [row['revenue'] - row['cost'] for row in data]",
+        data=[{"revenue": 10, "cost": 4}],
+    )
+    assert safe["data"] == [6]
+    with pytest.raises(SandboxError, match="PYTHON_NODE_NOT_ALLOWED"):
+        await run_safe_python("import os\nresult = 1")
 
 
 def test_parameter_compiler_fills_defaults_and_source_policy_blocks_llm_value() -> None:

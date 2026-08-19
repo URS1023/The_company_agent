@@ -35,7 +35,7 @@
 ```text
 Python 3.12 compile      passed
 Ruff                     passed
-Pytest                   46 passed
+Pytest                   52 passed
 Ruff                     passed
 Alembic SQL generation   passed (`0002_runtime_trace`)
 Next ESLint              passed
@@ -55,7 +55,7 @@ Playwright E2E           14 passed (Chromium + mobile Chromium, serialized SQLit
 - 没有使用聊天中出现的 Agnes/SiliconFlow Key 发起模型请求。
 - 没有把聊天中的 MySQL 密码写入任何文件或命令。
 - 没有修改现有 MySQL、Redis、Elasticsearch 服务配置。
-- native-dev 只开放仓库内经过测试的确定性分析器；任意 Python 和普通用户 stdio MCP 仍保持关闭，需安全发布阶段隔离运行时后开启。
+- native-dev 只开放仓库内经过测试的确定性分析器和受限 `python.safe` 数据变换；任意 Python、文件/网络访问和普通用户 stdio MCP 仍保持关闭，需安全发布阶段隔离运行时后开启。
 
 ## 下一步
 

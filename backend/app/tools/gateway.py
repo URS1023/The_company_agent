@@ -42,9 +42,20 @@ def validate_source_policy(arguments: dict[str, Any], policy: dict[str, Any] | N
 
 
 def normalize_result(result: HttpResult) -> dict[str, Any]:
+    artifacts: list[dict[str, Any]] = []
+    if isinstance(result.data, dict) and result.data.get("url"):
+        artifacts.append(
+            {
+                "type": result.data.get("type", "external"),
+                "name": result.data.get("name", "external-result"),
+                "mime_type": result.data.get("mime_type"),
+                "url": result.data["url"],
+            }
+        )
     return {
         "status": "success" if 200 <= result.status_code < 300 else "failed",
         "data": result.data,
+        "artifacts": artifacts,
         "metadata": {"status_code": result.status_code},
     }
 

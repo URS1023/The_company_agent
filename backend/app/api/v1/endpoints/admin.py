@@ -343,6 +343,8 @@ async def probe_model_profile(
             }
         else:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未知 Model Profile")
+    except HTTPException:
+        raise
     except Exception as exc:
         await record_audit(
             db,

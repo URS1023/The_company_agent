@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.ids import new_id
 from backend.app.core.security import utc_now
 from backend.app.core.storage import LocalFileStorage
-from backend.app.models.capabilities import Artifact
+from backend.app.models.capabilities import Artifact, ArtifactLineage
 from backend.app.models.runtime import Run
 from backend.app.services.audit import record_audit
 from backend.app.services.runtime import append_run_event
@@ -47,6 +47,18 @@ async def persist_artifact(
     )
     db.add(artifact)
     await db.flush()
+    if parent_artifact_id:
+        db.add(
+            ArtifactLineage(
+                id=new_id(),
+                workspace_id=run.workspace_id,
+                artifact_id=artifact.id,
+                parent_artifact_id=parent_artifact_id,
+                relation="derived_from",
+                metadata_json={},
+                created_at=utc_now(),
+            )
+        )
     await append_run_event(
         db,
         workspace_id=run.workspace_id,

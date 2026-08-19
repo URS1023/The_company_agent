@@ -245,3 +245,19 @@ class Artifact(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ready")
     parent_artifact_id: Mapped[str | None] = mapped_column(String(26))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ArtifactLineage(Base):
+    __tablename__ = "artifact_lineage"
+    __table_args__ = (
+        UniqueConstraint("artifact_id", "parent_artifact_id", "relation"),
+        Index("ix_artifact_lineage_artifact_id", "artifact_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"), nullable=False)
+    parent_artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"), nullable=False)
+    relation: Mapped[str] = mapped_column(String(64), nullable=False, default="derived_from")
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

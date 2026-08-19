@@ -1,10 +1,12 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { apiJson, apiUploadMany } from "@/lib/api";
 
 type Message = { role: "user" | "assistant"; content: string };
-type RunEvent = { event?: string; payload?: { text?: string; error_summary?: string; error_code?: string }; error?: string };
+type RunEvent = { event?: string; payload?: { text?: string; error_summary?: string; error_code?: string; tool?: string; name?: string; step_id?: string; artifact_id?: string }; error?: string };
 type Plugin = { id: string; name: string; published_version_id: string | null };
 type KnowledgeBase = { id: string; name: string; status: string };
 type DataSource = { id: string; name: string; provider: string; status: string };
@@ -25,6 +27,7 @@ export default function ChatPage() {
   const [selectedDataSourceId, setSelectedDataSourceId] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const [activities, setActivities] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -55,6 +58,7 @@ export default function ChatPage() {
     setInput("");
     setRunning(true);
     setError("");
+    setActivities([]);
     try {
       let activeConversationId = conversationId;
       if (!activeConversationId) {
@@ -102,12 +106,18 @@ export default function ChatPage() {
       const handleEvent = (event: MessageEvent<string>) => {
         const data = JSON.parse(event.data) as RunEvent;
         if (data.event === "message.delta") appendAssistant(data.payload?.text ?? "");
+        if (data.event === "run.started") setActivities((current) => [...current, "任务已开始"]);
+        if (data.event === "step.started") setActivities((current) => [...current, `开始步骤：${data.payload?.name ?? "未命名"}`]);
+        if (data.event === "tool.started") setActivities((current) => [...current, `调用工具：${data.payload?.tool ?? "未知工具"}`]);
+        if (data.event === "tool.completed") setActivities((current) => [...current, `工具完成：${data.payload?.tool ?? "未知工具"}`]);
+        if (data.event === "artifact.created") setActivities((current) => [...current, `生成 Artifact：${data.payload?.artifact_id ?? ""}`]);
         if (data.event === "run.failed") {
           source.close();
           setError(data.payload?.error_summary ?? data.error ?? "Run 执行失败");
           setRunning(false);
         }
         if (data.event === "run.completed") {
+          setActivities((current) => [...current, "任务已完成"]);
           source.close();
           setRunning(false);
         }
@@ -148,7 +158,7 @@ export default function ChatPage() {
           <div className="chat-header-left"><button className="mobile-nav-button" type="button" aria-label="打开导航" onClick={() => setNavOpen(true)}>☰</button><div><span className="chat-title">新对话</span><span className="chat-context"> · 默认工作区</span></div></div>
           {lastRunId ? <a className="details-button" href={`/runs/${lastRunId}`}>执行详情</a> : <button className="details-button" type="button">执行详情</button>}
         </header>
-        <section className="message-column" aria-live="polite">
+        <section className="message-column">
           {messages.length === 0 ? (
             <div className="empty-chat">
               <div className="empty-mark">CA</div>
@@ -163,10 +173,11 @@ export default function ChatPage() {
             messages.map((message, index) => (
               <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
                 <div className="message-role">{message.role === "user" ? "你" : "企业 AI"}</div>
-                <p>{message.content}</p>
+                {message.role === "assistant" ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown> : <p>{message.content}</p>}
               </article>
             ))
           )}
+          {activities.length ? <div className="execution-timeline" aria-live="polite"><span className="rail-kicker">执行进度</span>{activities.slice(-6).map((activity, index) => <span key={`${activity}-${index}`}>{activity}</span>)}</div> : null}
           {error ? <p className="form-error inline-error" role="alert">{error}</p> : null}
         </section>
         <form className="composer-wrap" onSubmit={submit}>

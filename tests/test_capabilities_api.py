@@ -7,9 +7,11 @@ from sqlalchemy import select
 from backend.app.core.secrets import SecretManager
 from backend.app.models.capabilities import (
     ConnectorVersion,
+    PluginSkillBinding,
     PluginVersion,
     SecretRecord,
     SkillVersion,
+    Tool,
     ToolVersion,
 )
 
@@ -96,6 +98,21 @@ def test_skill_publish_is_versioned_and_plugin_can_clone(client, db_session, adm
     assert clone.status_code == 201
     assert clone.json()["id"] != plugin_id
     assert clone.json()["visibility"] == "private"
+    cloned_version = asyncio.get_event_loop().run_until_complete(
+        db_session.scalar(
+            select(PluginVersion).where(PluginVersion.plugin_id == clone.json()["id"])
+        )
+    )
+    assert cloned_version is not None
+    cloned_binding = asyncio.get_event_loop().run_until_complete(
+        db_session.scalar(
+            select(PluginSkillBinding).where(
+                PluginSkillBinding.plugin_version_id == cloned_version.id
+            )
+        )
+    )
+    assert cloned_binding is not None
+    assert client.post(f"/api/v1/plugin-versions/{cloned_version.id}/test-runs").status_code == 200
 
 
 def test_connector_publish_requires_admin_and_keeps_spec(client, db_session, admin_seed) -> None:
@@ -130,6 +147,9 @@ def test_connector_publish_requires_admin_and_keeps_spec(client, db_session, adm
     tool_version = asyncio.get_event_loop().run_until_complete(read_tool_version())
     assert tool_version is not None
     assert tool_version.spec["name"] == "health"
+    listed_tools = client.get(f"/api/v1/connectors/{connector_id}/tools")
+    assert listed_tools.status_code == 200
+    assert listed_tools.json()[0]["name"] == "health"
     assert client.post(f"/api/v1/connector-versions/{version.id}/test-runs").status_code == 200
     published = client.post(f"/api/v1/connector-versions/{version.id}/publish")
     assert published.status_code == 200
@@ -167,6 +187,18 @@ def test_data_source_rejects_inline_credentials_and_accepts_secret_reference(
     assert created.status_code == 201
     assert created.json()["secret_id"] == secret.json()["id"]
     assert "password" not in created.json()["connection_config"]
+    source_id = created.json()["id"]
+    updated = client.patch(f"/api/v1/data-sources/{source_id}", json={"name": "Finance Updated"})
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Finance Updated"
+    connection = client.post(f"/api/v1/data-sources/{source_id}/test-connection")
+    assert connection.status_code == 422
+    tool_call = client.post(
+        f"/api/v1/data-sources/{source_id}/tools/database.describe",
+        json={"arguments": {}},
+    )
+    assert tool_call.status_code == 422
+    assert client.delete(f"/api/v1/data-sources/{source_id}").status_code == 204
 
 
 def test_capability_versions_share_and_plugin_run_are_workspace_scoped(
@@ -195,6 +227,10 @@ def test_capability_versions_share_and_plugin_run_are_workspace_scoped(
     )
     assert draft.status_code == 200
     assert draft.json()["version_number"] == 2
+    updated = client.patch(
+        f"/api/v1/plugins/{plugin_id}", json={"spec": {"instructions": "通过 PATCH 更新"}}
+    )
+    assert updated.status_code == 200
 
 
 def test_connector_builder_preview_never_embeds_secret(client, admin_seed) -> None:
@@ -215,3 +251,49 @@ def test_connector_builder_preview_never_embeds_secret(client, admin_seed) -> No
     assert body["spec"]["name"] == "ppt"
     assert body["spec"]["secret_id"] is None
     assert any("Secret" in warning for warning in body["warnings"])
+
+
+def test_skill_version_routes_and_tool_toggle_are_exercisable(
+    client, db_session, admin_seed
+) -> None:
+    _login(client)
+    skill = client.post(
+        "/api/v1/skills", json={"name": "可回滚 Skill", "spec": {"rules": ["先验证"]}}
+    ).json()
+    skill_versions = client.get(f"/api/v1/skills/{skill['id']}/versions")
+    assert skill_versions.status_code == 200
+    assert len(skill_versions.json()) == 1
+    initial_version_id = skill_versions.json()[0]["id"]
+    assert client.post(f"/api/v1/skill-versions/{initial_version_id}/test-runs").status_code == 200
+    assert client.post(f"/api/v1/skill-versions/{initial_version_id}/publish").status_code == 200
+    new_version = client.post(
+        f"/api/v1/skills/{skill['id']}/versions",
+        json={"name": "可回滚 Skill", "spec": {"rules": ["新规则"]}},
+    )
+    assert new_version.status_code == 200
+    patched = client.patch(
+        f"/api/v1/skills/{skill['id']}",
+        json={"spec": {"rules": ["通过 PATCH 创建 Draft"]}},
+    )
+    assert patched.status_code == 200
+    rollback = client.post(f"/api/v1/skills/{skill['id']}/rollback/{initial_version_id}")
+    assert rollback.status_code == 200
+    assert rollback.json()["status"] == "draft"
+
+    connector = client.post(
+        "/api/v1/connectors",
+        json={
+            "name": "Tool Toggle",
+            "provider": "http",
+            "spec": {"tools": [{"name": "toggle_me", "description": "test"}]},
+        },
+    ).json()
+
+    async def read_tool():
+        return await db_session.scalar(select(Tool).where(Tool.connector_id == connector["id"]))
+
+    tool = asyncio.get_event_loop().run_until_complete(read_tool())
+    assert tool is not None
+    toggled = client.patch(f"/api/v1/tools/{tool.id}", json={"status": "disabled"})
+    assert toggled.status_code == 200
+    assert toggled.json()["status"] == "disabled"
