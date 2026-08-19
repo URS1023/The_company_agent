@@ -78,8 +78,9 @@ async def create_session(db: AsyncSession, user: User, credential: LocalCredenti
 
 
 def set_session_cookie(response: Response, token: str) -> None:
+    cookie_name = session_cookie_name()
     response.set_cookie(
-        key=settings.session_cookie_name,
+        key=cookie_name,
         value=token,
         max_age=settings.session_absolute_seconds,
         httponly=True,
@@ -89,10 +90,16 @@ def set_session_cookie(response: Response, token: str) -> None:
     )
 
 
+def session_cookie_name() -> str:
+    if settings.app_env == "production" and not settings.session_cookie_name.startswith("__Host-"):
+        return f"__Host-{settings.session_cookie_name}"
+    return settings.session_cookie_name
+
+
 async def current_user_context(
     request: Request, db: AsyncSession
 ) -> tuple[User, AuthIdentity, LocalCredential, WorkspaceMember]:
-    token = request.cookies.get(settings.session_cookie_name)
+    token = request.cookies.get(session_cookie_name())
     unauthorized = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已失效")
     if not token:
         raise unauthorized
@@ -146,5 +153,6 @@ __all__ = [
     "new_temporary_password",
     "require_admin",
     "set_session_cookie",
+    "session_cookie_name",
     "workspace_for_user",
 ]

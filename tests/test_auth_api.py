@@ -166,3 +166,14 @@ def test_logout_revokes_current_session(client, admin_seed) -> None:
     )
     assert client.post("/api/v1/auth/logout").status_code == 204
     assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_production_cookie_uses_host_prefix(client, admin_seed, monkeypatch) -> None:
+    from backend.app.core.config import settings
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    response = client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"}
+    )
+    assert response.status_code == 200
+    assert "__Host-company_agent_session" in response.headers.get("set-cookie", "")

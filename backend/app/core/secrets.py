@@ -32,4 +32,35 @@ class SecretManager:
         return json.loads(data.decode("utf-8"))
 
 
-__all__ = ["SecretManager"]
+_SENSITIVE_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "client_secret",
+    "password",
+    "secret",
+    "token",
+}
+
+
+def assert_no_inline_secrets(value: object, *, path: str = "spec") -> None:
+    """Reject credential-shaped keys from persisted capability specifications."""
+
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).replace("-", "_").lower()
+            if (
+                normalized in _SENSITIVE_KEYS
+                or normalized.endswith("_token")
+                or "api_key" in normalized
+                or normalized.endswith("authorization")
+            ):
+                raise ValueError(f"{path}.{key} 必须使用 secret_id 引用")
+            if normalized != "secret_id":
+                assert_no_inline_secrets(child, path=f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            assert_no_inline_secrets(child, path=f"{path}[{index}]")
+
+
+__all__ = ["SecretManager", "assert_no_inline_secrets"]

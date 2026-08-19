@@ -34,6 +34,8 @@ export default function ChatPage() {
     void apiJson<Plugin[]>("/api/v1/plugins").then(setPlugins).catch(() => setPlugins([]));
     void apiJson<KnowledgeBase[]>("/api/v1/knowledge-bases").then(setKnowledgeBases).catch(() => setKnowledgeBases([]));
     void apiJson<DataSource[]>("/api/v1/data-sources").then(setDataSources).catch(() => setDataSources([]));
+    const pluginFromQuery = new URLSearchParams(window.location.search).get("plugin");
+    if (pluginFromQuery) setSelectedPluginId(pluginFromQuery);
   }, []);
 
   async function chooseFiles(event: ChangeEvent<HTMLInputElement>) {

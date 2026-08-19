@@ -266,6 +266,19 @@ def test_connector_builder_preview_never_embeds_secret(client, admin_seed) -> No
     assert any("Secret" in warning for warning in body["warnings"])
 
 
+def test_capability_specs_reject_inline_credentials(client, admin_seed) -> None:
+    _login(client)
+    rejected = client.post(
+        "/api/v1/connectors",
+        json={
+            "name": "泄露凭据",
+            "provider": "http",
+            "spec": {"headers": {"Authorization": "Bearer hard-coded"}},
+        },
+    )
+    assert rejected.status_code == 422
+
+
 def test_skill_version_routes_and_tool_toggle_are_exercisable(
     client, db_session, admin_seed
 ) -> None:

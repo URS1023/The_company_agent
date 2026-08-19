@@ -21,6 +21,7 @@ from backend.app.services.auth import (
     create_session,
     current_user_context,
     find_local_identity,
+    session_cookie_name,
     set_session_cookie,
     workspace_for_user,
 )
@@ -69,9 +70,8 @@ async def login(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> None:
-    from backend.app.core.config import settings
 
-    token = request.cookies.get(settings.session_cookie_name)
+    token = request.cookies.get(session_cookie_name())
     if token:
         from backend.app.core.security import digest_token
 
@@ -81,7 +81,7 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
         if session:
             session.revoked_at = utc_now()
             await db.commit()
-    response.delete_cookie(settings.session_cookie_name, path="/")
+    response.delete_cookie(session_cookie_name(), path="/")
 
 
 @router.get("/me", response_model=UserResponse)
@@ -104,7 +104,7 @@ async def change_password(
     credential.must_change_password = False
     credential.password_changed_at = utc_now()
     credential.credential_version += 1
-    token = request.cookies.get(settings.session_cookie_name)
+    token = request.cookies.get(session_cookie_name())
     if token:
         session = await db.scalar(
             select(Session).where(Session.token_digest == digest_token(token))

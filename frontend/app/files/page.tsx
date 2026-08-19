@@ -43,6 +43,7 @@ export default function FilesPage() {
   }
 
   useEffect(() => { void load(); }, []);
+  useEffect(() => { if (window.location.search.includes("tab=artifacts")) setTab("artifacts"); }, []);
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(event.target.files ?? []);

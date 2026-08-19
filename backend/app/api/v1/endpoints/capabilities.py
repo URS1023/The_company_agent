@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.database import get_db
 from backend.app.core.ids import new_id
-from backend.app.core.secrets import SecretManager
+from backend.app.core.secrets import SecretManager, assert_no_inline_secrets
 from backend.app.core.security import utc_now
 from backend.app.models.capabilities import (
     Artifact,
@@ -104,6 +104,17 @@ def _plugin_version(version: PluginVersion) -> PluginVersionResponse:
 
 def _data_source(source) -> DataSourceResponse:
     return DataSourceResponse.model_validate(source, from_attributes=True)
+
+
+def _safe_spec(spec: dict) -> dict:
+    try:
+        assert_no_inline_secrets(spec)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return spec
 
 
 def _tool(tool: Tool) -> ToolResponse:
@@ -271,7 +282,7 @@ async def create_skill(
         skill_id=skill.id,
         version_number=1,
         status="draft",
-        spec=payload.spec,
+        spec=_safe_spec(payload.spec),
         created_by=user.id,
         created_at=now,
     )
@@ -363,7 +374,7 @@ async def archive_or_update_skill(
                 version_number=int(latest or 0) + 1,
                 based_on_version_id=skill.published_version_id,
                 status="draft",
-                spec=payload.spec,
+                spec=_safe_spec(payload.spec),
                 created_by=user.id,
                 created_at=utc_now(),
             )
@@ -431,7 +442,7 @@ async def create_skill_version(
         version_number=int(latest or 0) + 1,
         based_on_version_id=skill.published_version_id,
         status="draft",
-        spec=payload.spec,
+        spec=_safe_spec(payload.spec),
         created_by=user.id,
         created_at=now,
     )
@@ -572,7 +583,7 @@ async def create_connector(
         connector_id=connector.id,
         version_number=1,
         status="draft",
-        spec=connector_spec,
+        spec=_safe_spec(connector_spec),
         created_by=user.id,
         created_at=now,
     )
@@ -1098,7 +1109,7 @@ async def create_connector_version(
         version_number=int(latest or 0) + 1,
         based_on_version_id=connector.published_version_id,
         status="draft",
-        spec=payload.spec,
+        spec=_safe_spec(payload.spec),
         created_by=user.id,
         created_at=now,
     )
@@ -1248,7 +1259,7 @@ async def create_plugin(
         plugin_id=plugin.id,
         version_number=1,
         status="draft",
-        spec=payload.spec,
+        spec=_safe_spec(payload.spec),
         created_by=user.id,
         created_at=now,
     )
@@ -1336,7 +1347,7 @@ async def create_plugin_version(
         version_number=int(latest or 0) + 1,
         based_on_version_id=plugin.published_version_id,
         status="draft",
-        spec=payload.spec,
+        spec=_safe_spec(payload.spec),
         created_by=user.id,
         created_at=now,
     )
@@ -1433,7 +1444,7 @@ async def update_plugin(
                 version_number=int(latest or 0) + 1,
                 based_on_version_id=plugin.published_version_id,
                 status="draft",
-                spec=payload.spec,
+                spec=_safe_spec(payload.spec),
                 created_by=user.id,
                 created_at=utc_now(),
             )
