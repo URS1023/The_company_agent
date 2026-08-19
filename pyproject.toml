@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "company-agent"
+version = "0.1.0"
+description = "Enterprise AI work platform V1"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alembic>=1.15,<2",
+  "argon2-cffi>=23.1,<26",
+  "asyncmy>=0.2.10,<1",
+  "elasticsearch[async]>=8.14,<9",
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "orjson>=3.10,<4",
+  "pydantic-settings>=2.6,<3",
+  "python-multipart>=0.0.20,<1",
+  "redis>=5.2,<7",
+  "sqlalchemy>=2.0.36,<3",
+  "sqlglot>=26,<28",
+  "tenacity>=9,<10",
+  "ulid-py>=1.1,<2",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+files = [
+  "matplotlib>=3.9,<4",
+  "numpy>=2,<3",
+  "openpyxl>=3.1,<4",
+  "pandas>=2.2,<3",
+  "pillow>=11,<12",
+  "pymupdf>=1.25,<2",
+  "python-docx>=1.1,<2",
+  "python-pptx>=1.0,<2",
+]
+dev = [
+  "aiosqlite>=0.20,<1",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.25,<1",
+  "pytest-cov>=6,<7",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+company-agent-api = "backend.app.main:run"
+company-agent-probe = "backend.scripts.provider_probe:main"
+company-agent-bootstrap = "backend.scripts.bootstrap_admin:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
