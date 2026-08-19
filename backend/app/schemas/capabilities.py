@@ -11,6 +11,11 @@ class CreateSecretRequest(BaseModel):
     value: dict[str, str] = Field(min_length=1)
 
 
+class UpdateSecretRequest(BaseModel):
+    value: dict[str, str] | None = Field(default=None, min_length=1)
+    status: str | None = Field(default=None, pattern="^(active|revoked)$")
+
+
 class SecretResponse(BaseModel):
     id: str
     name: str
@@ -241,6 +246,7 @@ __all__ = [
     "CreatePluginRequest",
     "UpdatePluginRequest",
     "CreateSecretRequest",
+    "UpdateSecretRequest",
     "CreateSkillRequest",
     "UpdateSkillRequest",
     "DataSourceResponse",

@@ -54,6 +54,7 @@ from backend.app.schemas.capabilities import (
     ToolTestResponse,
     UpdateDataSourceRequest,
     UpdatePluginRequest,
+    UpdateSecretRequest,
     UpdateSkillRequest,
     UpdateToolRequest,
     VersionSpecRequest,
@@ -177,6 +178,74 @@ async def list_secrets(
         .order_by(SecretRecord.created_at.desc())
     )
     return [SecretResponse.model_validate(row, from_attributes=True) for row in rows]
+
+
+@router.patch("/secrets/{secret_id}", response_model=SecretResponse)
+async def update_secret(
+    secret_id: str,
+    payload: UpdateSecretRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SecretResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    if membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+    record = await db.scalar(
+        select(SecretRecord).where(
+            SecretRecord.id == secret_id,
+            SecretRecord.workspace_id == membership.workspace_id,
+            SecretRecord.deleted_at.is_(None),
+        )
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Secret 不存在")
+    if payload.value is not None:
+        record.nonce, record.ciphertext = SecretManager().encrypt(payload.value)
+        record.key_version += 1
+    if payload.status is not None:
+        record.status = payload.status
+    record.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="secret.updated",
+        resource_type="secret",
+        resource_id=record.id,
+        metadata={"status": record.status, "rotated": payload.value is not None},
+    )
+    await db.commit()
+    return SecretResponse.model_validate(record, from_attributes=True)
+
+
+@router.delete("/secrets/{secret_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_secret(
+    secret_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> None:
+    user, _, _, membership = await current_user_context(request, db)
+    if membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+    record = await db.scalar(
+        select(SecretRecord).where(
+            SecretRecord.id == secret_id,
+            SecretRecord.workspace_id == membership.workspace_id,
+            SecretRecord.deleted_at.is_(None),
+        )
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Secret 不存在")
+    record.status = "revoked"
+    record.deleted_at = utc_now()
+    record.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="secret.revoked",
+        resource_type="secret",
+        resource_id=record.id,
+    )
+    await db.commit()
 
 
 @router.post("/skills", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)

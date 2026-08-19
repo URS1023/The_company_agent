@@ -47,6 +47,13 @@ def test_secret_is_encrypted_and_never_returned(client, db_session, admin_seed) 
     assert record is not None
     assert "secret-value" not in record.ciphertext
     assert SecretManager().decrypt(record.nonce, record.ciphertext) == {"api_key": "secret-value"}
+    rotated = client.patch(
+        f"/api/v1/secrets/{response.json()['id']}",
+        json={"value": {"api_key": "rotated-value"}},
+    )
+    assert rotated.status_code == 200
+    assert "ciphertext" not in rotated.json()
+    assert client.delete(f"/api/v1/secrets/{response.json()['id']}").status_code == 204
 
 
 def test_skill_publish_is_versioned_and_plugin_can_clone(client, db_session, admin_seed) -> None:
