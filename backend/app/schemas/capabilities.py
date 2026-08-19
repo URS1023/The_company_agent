@@ -87,6 +87,7 @@ class PluginResponse(BaseModel):
     description: str
     visibility: str
     published_version_id: str | None
+    draft_version_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

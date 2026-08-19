@@ -515,7 +515,9 @@ async def create_plugin(
     )
     db.add_all([plugin, version])
     await db.commit()
-    return _plugin(plugin)
+    response = _plugin(plugin)
+    response.draft_version_id = version.id
+    return response
 
 
 @router.get("/plugins", response_model=list[PluginResponse])
@@ -606,7 +608,9 @@ async def clone_plugin(
     )
     db.add_all([clone, clone_version])
     await db.commit()
-    return _plugin(clone)
+    response = _plugin(clone)
+    response.draft_version_id = clone_version.id
+    return response
 
 
 async def _create_capability_test(
