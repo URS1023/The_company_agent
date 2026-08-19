@@ -36,6 +36,32 @@ def upgrade() -> None:
         "data_sources",
         sa.Column("visibility", sa.String(32), nullable=False, server_default="workspace"),
     )
+    op.create_table(
+        "model_profiles",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("profile_name", sa.String(100), nullable=False),
+        sa.Column("provider", sa.String(64), nullable=False),
+        sa.Column("model", sa.String(200), nullable=False),
+        sa.Column("endpoint", sa.String(500), nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("capabilities_json", sa.JSON(), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint("workspace_id", "profile_name"),
+    )
+    op.create_table(
+        "model_probe_results",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("profile_id", sa.String(26), sa.ForeignKey("model_profiles.id"), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("details_json", sa.JSON(), nullable=False),
+        sa.Column("error_code", sa.String(100)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_model_probe_results_profile_id_created_at", "profile_id", "created_at"),
+    )
     op.add_column("messages", sa.Column("parts_json", sa.JSON(), nullable=True))
     op.add_column("runs", sa.Column("parent_run_id", sa.String(26), nullable=True))
     op.add_column("runs", sa.Column("context_snapshot", sa.JSON(), nullable=True))
@@ -157,6 +183,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     for table in [
+        "model_probe_results",
+        "model_profiles",
         "artifact_lineage",
         "audit_logs",
         "citations",
@@ -166,7 +194,6 @@ def downgrade() -> None:
         "run_resource_snapshots",
     ]:
         op.drop_table(table)
-    op.drop_column("data_sources", "visibility")
     op.drop_constraint("fk_runs_parent_run_id", "runs", type_="foreignkey")
     op.drop_column("runs", "cost")
     op.drop_column("runs", "model_profile")
@@ -175,3 +202,4 @@ def downgrade() -> None:
     op.drop_column("messages", "parts_json")
     op.drop_constraint("uq_run_events_run_id_sequence", "run_events", type_="unique")
     op.drop_column("run_events", "sequence")
+    op.drop_column("data_sources", "visibility")

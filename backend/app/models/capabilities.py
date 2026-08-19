@@ -27,6 +27,38 @@ class SecretRecord(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ModelProfile(Base):
+    __tablename__ = "model_profiles"
+    __table_args__ = (UniqueConstraint("workspace_id", "profile_name"),)
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    profile_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(500), nullable=False)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    capabilities_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="unprobed")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ModelProbeResult(Base):
+    __tablename__ = "model_probe_results"
+    __table_args__ = (
+        Index("ix_model_probe_results_profile_id_created_at", "profile_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("model_profiles.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    details_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Skill(Base):
     __tablename__ = "skills"
     __table_args__ = (Index("ix_skills_workspace_id_updated_at", "workspace_id", "updated_at"),)

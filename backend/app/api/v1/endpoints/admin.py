@@ -10,6 +10,7 @@ from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.ids import new_id
 from backend.app.core.security import hash_password, utc_now
+from backend.app.models.capabilities import ModelProbeResult, ModelProfile
 from backend.app.models.identity import (
     AuthIdentity,
     LocalCredential,
@@ -32,6 +33,59 @@ from backend.app.services.audit import record_audit
 from backend.app.services.auth import _public_user, new_temporary_password, require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+async def _ensure_model_profiles(db: AsyncSession, workspace_id: str) -> list[ModelProfile]:
+    definitions = [
+        (
+            "reasoning",
+            "agnes",
+            settings.agnes_model,
+            settings.agnes_base_url,
+            settings.allow_external_chat,
+        ),
+        (
+            "vision",
+            "siliconflow",
+            settings.siliconflow_vision_model,
+            settings.siliconflow_base_url,
+            settings.allow_external_vision,
+        ),
+        (
+            "embedding",
+            "siliconflow",
+            settings.siliconflow_embedding_model,
+            settings.siliconflow_base_url,
+            settings.allow_external_embedding,
+        ),
+    ]
+    profiles: list[ModelProfile] = []
+    for profile_name, provider, model, endpoint, enabled in definitions:
+        profile = await db.scalar(
+            select(ModelProfile).where(
+                ModelProfile.workspace_id == workspace_id,
+                ModelProfile.profile_name == profile_name,
+            )
+        )
+        if not profile:
+            now = utc_now()
+            profile = ModelProfile(
+                id=new_id(),
+                workspace_id=workspace_id,
+                profile_name=profile_name,
+                provider=provider,
+                model=model,
+                endpoint=endpoint,
+                enabled=enabled,
+                capabilities_json={},
+                status="unprobed",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(profile)
+            await db.flush()
+        profiles.append(profile)
+    return profiles
 
 
 async def _member_rows(db: AsyncSession, workspace_id: str) -> list[UserResponse]:
@@ -287,30 +341,25 @@ async def list_audit_logs(
 
 @router.get("/model-profiles")
 async def list_model_profiles(request: Request, db: AsyncSession = Depends(get_db)) -> list[dict]:
-    _, _, _, _ = await require_admin(request, db)
+    _, _, _, membership = await require_admin(request, db)
+    profiles = await _ensure_model_profiles(db, membership.workspace_id)
+    await db.commit()
     return [
         {
-            "profile": "reasoning",
-            "provider": "agnes",
-            "model": settings.agnes_model,
-            "configured": bool(settings.agnes_api_key),
-            "enabled": settings.allow_external_chat,
-        },
-        {
-            "profile": "vision",
-            "provider": "siliconflow",
-            "model": settings.siliconflow_vision_model,
-            "configured": bool(settings.siliconflow_api_key),
-            "enabled": settings.allow_external_vision,
-        },
-        {
-            "profile": "embedding",
-            "provider": "siliconflow",
-            "model": settings.siliconflow_embedding_model,
-            "dimensions": settings.siliconflow_embedding_dimensions,
-            "configured": bool(settings.siliconflow_api_key),
-            "enabled": settings.allow_external_embedding,
-        },
+            "id": item.id,
+            "profile": item.profile_name,
+            "provider": item.provider,
+            "model": item.model,
+            "configured": bool(
+                settings.agnes_api_key
+                if item.profile_name == "reasoning"
+                else settings.siliconflow_api_key
+            ),
+            "enabled": item.enabled,
+            "status": item.status,
+            "capabilities": item.capabilities_json,
+        }
+        for item in profiles
     ]
 
 
@@ -319,6 +368,11 @@ async def probe_model_profile(
     profile: str, request: Request, db: AsyncSession = Depends(get_db)
 ) -> dict[str, object]:
     user, _, _, membership = await require_admin(request, db)
+    profiles = await _ensure_model_profiles(db, membership.workspace_id)
+    profile_record = next((item for item in profiles if item.profile_name == profile), None)
+    if profile_record is None:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未知 Model Profile")
     try:
         if profile == "reasoning":
             response = await agnes_client().chat(
@@ -341,8 +395,6 @@ async def probe_model_profile(
                 "dimensions": len(vectors[0]) if vectors else 0,
                 "model": settings.siliconflow_embedding_model,
             }
-        else:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未知 Model Profile")
     except HTTPException:
         raise
     except Exception as exc:
@@ -354,6 +406,19 @@ async def probe_model_profile(
             resource_type="model_profile",
             resource_id=profile,
             metadata={"error": type(exc).__name__},
+        )
+        profile_record.status = "failed"
+        profile_record.updated_at = utc_now()
+        db.add(
+            ModelProbeResult(
+                id=new_id(),
+                workspace_id=membership.workspace_id,
+                profile_id=profile_record.id,
+                status="failed",
+                details_json={},
+                error_code=type(exc).__name__,
+                created_at=utc_now(),
+            )
         )
         await db.commit()
         raise HTTPException(
@@ -368,8 +433,21 @@ async def probe_model_profile(
         resource_id=profile,
         metadata=detail,
     )
+    profile_record.status = "ready"
+    profile_record.capabilities_json = detail
+    profile_record.updated_at = utc_now()
+    db.add(
+        ModelProbeResult(
+            id=new_id(),
+            workspace_id=membership.workspace_id,
+            profile_id=profile_record.id,
+            status="ready",
+            details_json=detail,
+            created_at=utc_now(),
+        )
+    )
     await db.commit()
-    return {"profile": profile, "status": "ready", **detail}
+    return {"profile": profile, "profile_id": profile_record.id, "status": "ready", **detail}
 
 
 __all__ = ["router"]

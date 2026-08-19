@@ -1,6 +1,10 @@
+import asyncio
+
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from backend.app.main import app
+from backend.app.models.capabilities import ModelProbeResult
 
 
 def test_liveness_is_local_and_does_not_require_dependencies() -> None:
@@ -63,7 +67,7 @@ def test_admin_model_probe_unknown_profile_is_rejected(client, admin_seed) -> No
 
 
 def test_admin_model_probe_records_success_without_exposing_key(
-    client, admin_seed, monkeypatch
+    client, admin_seed, db_session, monkeypatch
 ) -> None:
     class FakeResponse:
         text = "OK"
@@ -85,3 +89,10 @@ def test_admin_model_probe_records_success_without_exposing_key(
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
     assert "api_key" not in response.text
+
+    async def read_probe():
+        return await db_session.scalar(
+            select(ModelProbeResult).where(ModelProbeResult.status == "ready")
+        )
+
+    assert asyncio.get_event_loop().run_until_complete(read_probe()) is not None

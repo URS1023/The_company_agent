@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -28,15 +29,47 @@ class ChatResponse:
 class OpenAICompatibleClient:
     """Small adapter for providers exposing the OpenAI Chat/Embedding shapes."""
 
-    def __init__(self, base_url: str, api_key: str | None, timeout: float = 120.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str | None,
+        timeout: float = 120.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+        max_retries: int = 2,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self.transport = transport
+        self.max_retries = max(0, max_retries)
 
     def _headers(self) -> dict[str, str]:
         if not self.api_key:
             raise ProviderConfigurationError("provider API key is not configured")
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+
+    async def _post_json(self, path: str, payload: dict[str, Any]) -> httpx.Response:
+        for attempt in range(self.max_retries + 1):
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self.timeout, transport=self.transport
+                ) as client:
+                    response = await client.post(
+                        f"{self.base_url}{path}", headers=self._headers(), json=payload
+                    )
+            except (httpx.TimeoutException, httpx.NetworkError):
+                if attempt >= self.max_retries:
+                    raise
+                await asyncio.sleep(0.2 * (2**attempt))
+                continue
+            if (
+                response.status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+                and attempt < self.max_retries
+            ):
+                await asyncio.sleep(0.2 * (2**attempt))
+                continue
+            return response
+        raise RuntimeError("provider request retry loop exhausted")
 
     async def chat(
         self,
@@ -55,10 +88,7 @@ class OpenAICompatibleClient:
             payload["response_format"] = response_format
         if enable_thinking is not None:
             payload["enable_thinking"] = enable_thinking
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions", headers=self._headers(), json=payload
-            )
+        response = await self._post_json("/chat/completions", payload)
         if response.is_error:
             raise ProviderResponseError(f"chat provider returned HTTP {response.status_code}")
         if stream:
@@ -86,7 +116,7 @@ class OpenAICompatibleClient:
             payload["tools"] = tools
         if enable_thinking is not None:
             payload["enable_thinking"] = enable_thinking
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
             async with client.stream(
                 "POST", f"{self.base_url}/chat/completions", headers=self._headers(), json=payload
             ) as response:
@@ -113,12 +143,7 @@ class OpenAICompatibleClient:
         if not self.api_key:
             raise ProviderConfigurationError("provider API key is not configured")
         payload = {"model": model, "input": inputs, "encoding_format": "float"}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/embeddings",
-                headers=self._headers(),
-                json=payload,
-            )
+        response = await self._post_json("/embeddings", payload)
         if response.is_error:
             raise ProviderResponseError(f"embedding provider returned HTTP {response.status_code}")
         data = response.json()
