@@ -356,6 +356,57 @@ async def publish_skill_version(
     return _skill_version(version)
 
 
+@router.post("/skills/{skill_id}/rollback/{version_id}", response_model=SkillVersionResponse)
+async def rollback_skill(
+    skill_id: str,
+    version_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SkillVersionResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    skill = await db.scalar(
+        select(Skill).where(
+            Skill.id == skill_id,
+            Skill.workspace_id == membership.workspace_id,
+            Skill.owner_user_id == user.id,
+        )
+    )
+    source = await db.scalar(
+        select(SkillVersion).where(
+            SkillVersion.id == version_id,
+            SkillVersion.skill_id == skill_id,
+            SkillVersion.status == "published",
+        )
+    )
+    if not skill or not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill Version 不存在")
+    latest = await db.scalar(
+        select(func.max(SkillVersion.version_number)).where(SkillVersion.skill_id == skill.id)
+    )
+    draft = SkillVersion(
+        id=new_id(),
+        skill_id=skill.id,
+        version_number=int(latest or 0) + 1,
+        based_on_version_id=source.id,
+        status="draft",
+        spec=dict(source.spec or {}),
+        created_by=user.id,
+        created_at=utc_now(),
+    )
+    db.add(draft)
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="skill.rollback_draft_created",
+        resource_type="skill_version",
+        resource_id=draft.id,
+        metadata={"based_on_version_id": source.id},
+    )
+    await db.commit()
+    return _skill_version(draft)
+
+
 @router.post("/connectors", response_model=ConnectorResponse, status_code=status.HTTP_201_CREATED)
 async def create_connector(
     payload: CreateConnectorRequest,

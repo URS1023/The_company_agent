@@ -21,6 +21,8 @@ from backend.app.models.capabilities import (
     DataSource,
     Plugin,
     PluginVersion,
+    Skill,
+    SkillVersion,
 )
 from backend.app.models.files import FileAsset
 from backend.app.models.knowledge import KnowledgeBase
@@ -33,7 +35,11 @@ from backend.app.models.runtime import (
     RunStep,
     ToolCall,
 )
-from backend.app.schemas.capabilities import CapabilityProposalResponse
+from backend.app.schemas.capabilities import (
+    CapabilityDraftRequest,
+    CapabilityDraftResponse,
+    CapabilityProposalResponse,
+)
 from backend.app.schemas.chat import (
     ContinueRunRequest,
     CreateRunRequest,
@@ -524,6 +530,91 @@ async def capability_proposal(
         name=proposal.name,
         reason=proposal.reason,
         spec=proposal.spec,
+    )
+
+
+@router.post("/{run_id}/capability-drafts", response_model=CapabilityDraftResponse)
+async def create_capability_draft(
+    run_id: str,
+    payload: CapabilityDraftRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> CapabilityDraftResponse:
+    run, workspace_id = await _owned_run(run_id, request, db)
+    user, _, _, _ = await current_user_context(request, db)
+    message = await db.scalar(
+        select(Message)
+        .where(Message.conversation_id == run.conversation_id, Message.role == "user")
+        .order_by(Message.sequence.desc())
+    )
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="没有找到用户任务")
+    proposal = propose_from_user_intent(message.content)
+    if proposal.capability_type != payload.capability_type and payload.capability_type == "skill":
+        spec = {"instructions": message.content, "rules": [], "required_resources": []}
+        name = "可复用工作方法"
+    else:
+        spec = proposal.spec
+        name = proposal.name
+    now = utc_now()
+    if payload.capability_type == "skill":
+        skill = Skill(
+            id=new_id(),
+            workspace_id=workspace_id,
+            owner_user_id=user.id,
+            name=name,
+            description=proposal.reason,
+            visibility="private",
+            created_at=now,
+            updated_at=now,
+        )
+        version = SkillVersion(
+            id=new_id(),
+            skill_id=skill.id,
+            version_number=1,
+            status="draft",
+            spec=spec,
+            created_by=user.id,
+            created_at=now,
+        )
+        db.add_all([skill, version])
+        resource_id = skill.id
+    else:
+        plugin = Plugin(
+            id=new_id(),
+            workspace_id=workspace_id,
+            owner_user_id=user.id,
+            name=name,
+            description=proposal.reason,
+            visibility="private",
+            created_at=now,
+            updated_at=now,
+        )
+        version = PluginVersion(
+            id=new_id(),
+            plugin_id=plugin.id,
+            version_number=1,
+            status="draft",
+            spec=spec,
+            created_by=user.id,
+            created_at=now,
+        )
+        db.add_all([plugin, version])
+        resource_id = plugin.id
+    await record_audit(
+        db,
+        workspace_id=workspace_id,
+        actor_user_id=user.id,
+        action="capability.draft_created",
+        resource_type=payload.capability_type,
+        resource_id=resource_id,
+        run_id=run.id,
+    )
+    await db.commit()
+    return CapabilityDraftResponse(
+        capability_type=payload.capability_type,
+        resource_id=resource_id,
+        version_id=version.id,
     )
 
 

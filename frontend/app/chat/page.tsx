@@ -7,6 +7,7 @@ type Message = { role: "user" | "assistant"; content: string };
 type RunEvent = { event?: string; payload?: { text?: string; error_summary?: string; error_code?: string }; error?: string };
 type Plugin = { id: string; name: string; published_version_id: string | null };
 type KnowledgeBase = { id: string; name: string; status: string };
+type DataSource = { id: string; name: string; provider: string; status: string };
 type SelectedFile = { id: string; name: string; size: number };
 
 export default function ChatPage() {
@@ -20,6 +21,8 @@ export default function ChatPage() {
   const [selectedPluginId, setSelectedPluginId] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState("");
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
+  const [selectedDataSourceId, setSelectedDataSourceId] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -27,6 +30,7 @@ export default function ChatPage() {
   useEffect(() => {
     void apiJson<Plugin[]>("/api/v1/plugins").then(setPlugins).catch(() => setPlugins([]));
     void apiJson<KnowledgeBase[]>("/api/v1/knowledge-bases").then(setKnowledgeBases).catch(() => setKnowledgeBases([]));
+    void apiJson<DataSource[]>("/api/v1/data-sources").then(setDataSources).catch(() => setDataSources([]));
   }, []);
 
   async function chooseFiles(event: ChangeEvent<HTMLInputElement>) {
@@ -73,7 +77,8 @@ export default function ChatPage() {
           content: value,
           plugin_version_id: selectedPluginId || undefined,
           file_ids: selectedFiles.map((file) => file.id),
-          knowledge_base_ids: selectedKnowledgeBaseId ? [selectedKnowledgeBaseId] : []
+          knowledge_base_ids: selectedKnowledgeBaseId ? [selectedKnowledgeBaseId] : [],
+          data_source_ids: selectedDataSourceId ? [selectedDataSourceId] : []
         })
       });
       if (!runResponse.ok) throw new Error("Run 创建失败，请检查登录状态和服务状态");
@@ -136,7 +141,7 @@ export default function ChatPage() {
         </nav>
         <div className="sidebar-spacer" />
         <div className="workspace-chip"><span className="status-dot" /> 默认工作区</div>
-        <a className="sidebar-user" href="/admin/members">管理员 · 设置</a>
+        <a className="sidebar-user" href="/settings/profile">管理员 · 设置</a>
       </aside>
       <main className="chat-main">
         <header className="chat-header">
@@ -169,6 +174,7 @@ export default function ChatPage() {
             <button type="button" onClick={() => fileInputRef.current?.click()}>＋ 添加文件</button>
             <input ref={fileInputRef} type="file" multiple hidden onChange={chooseFiles} />
             <label className="plugin-select">选择知识库<select aria-label="选择知识库" value={selectedKnowledgeBaseId} onChange={(event) => setSelectedKnowledgeBaseId(event.target.value)}><option value="">不使用知识库</option>{knowledgeBases.filter((base) => base.status === "active").map((base) => <option value={base.id} key={base.id}>{base.name}</option>)}</select></label>
+            <label className="plugin-select">连接数据源<select aria-label="选择数据源" value={selectedDataSourceId} onChange={(event) => setSelectedDataSourceId(event.target.value)}><option value="">不使用数据源</option>{dataSources.filter((source) => source.status === "ready").map((source) => <option value={source.id} key={source.id}>{source.name}</option>)}</select></label>
             <label className="plugin-select">使用插件<select aria-label="选择插件" value={selectedPluginId} onChange={(event) => setSelectedPluginId(event.target.value)}><option value="">不使用插件</option>{plugins.filter((plugin) => plugin.published_version_id).map((plugin) => <option value={plugin.published_version_id ?? ""} key={plugin.id}>{plugin.name}</option>)}</select></label>
             {selectedFiles.map((file) => <button className="context-chip" type="button" key={file.id} onClick={() => setSelectedFiles((current) => current.filter((item) => item.id !== file.id))}>{file.name} ×</button>)}
           </div>

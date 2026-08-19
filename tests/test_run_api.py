@@ -43,6 +43,11 @@ def test_conversation_and_run_create_persists_event_and_outbox(
     proposal = client.post(f"/api/v1/runs/{run_id}/capability-proposals")
     assert proposal.status_code == 200
     assert proposal.json()["capability_type"] == "skill"
+    draft = client.post(
+        f"/api/v1/runs/{run_id}/capability-drafts", json={"capability_type": "skill"}
+    )
+    assert draft.status_code == 200
+    assert draft.json()["status"] == "draft"
 
 
 def test_run_trace_cancel_retry_and_conversation_lifecycle(client, db_session, admin_seed) -> None:

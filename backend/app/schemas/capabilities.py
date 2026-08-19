@@ -198,6 +198,17 @@ class CapabilityProposalResponse(BaseModel):
     spec: dict
 
 
+class CapabilityDraftRequest(BaseModel):
+    capability_type: str = Field(pattern="^(skill|plugin)$")
+
+
+class CapabilityDraftResponse(BaseModel):
+    capability_type: str
+    resource_id: str
+    version_id: str
+    status: str = "draft"
+
+
 __all__ = [
     "ConnectorResponse",
     "ConnectorVersionResponse",
@@ -224,4 +235,6 @@ __all__ = [
     "PluginRunRequest",
     "ShareRequest",
     "CapabilityProposalResponse",
+    "CapabilityDraftRequest",
+    "CapabilityDraftResponse",
 ]
