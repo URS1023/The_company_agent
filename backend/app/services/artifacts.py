@@ -9,6 +9,7 @@ from backend.app.core.security import utc_now
 from backend.app.core.storage import LocalFileStorage
 from backend.app.models.capabilities import Artifact
 from backend.app.models.runtime import Run
+from backend.app.services.audit import record_audit
 from backend.app.services.runtime import append_run_event
 
 
@@ -56,6 +57,16 @@ async def persist_artifact(
             "type": artifact.type,
             "name": artifact.name,
         },
+    )
+    await record_audit(
+        db,
+        workspace_id=run.workspace_id,
+        actor_user_id=owner_user_id,
+        action="artifact.created",
+        resource_type="artifact",
+        resource_id=artifact.id,
+        run_id=run.id,
+        metadata={"type": artifact.type, "name": artifact.name},
     )
     return artifact
 

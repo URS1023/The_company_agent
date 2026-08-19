@@ -41,7 +41,7 @@ async def run_trusted_sandbox(operation: str, arguments: dict[str, Any]) -> dict
 
 
 async def run_arbitrary_python(code: str, *, workdir: Path) -> dict[str, Any]:
-    if not settings.allow_arbitrary_python:
+    if settings.is_native_dev or not settings.allow_arbitrary_python:
         raise SandboxError("ARBITRARY_PYTHON_DISABLED_NATIVE_DEV")
     if not code.strip():
         raise SandboxError("PYTHON_CODE_EMPTY")

@@ -69,6 +69,14 @@ async def create_knowledge_base(
         updated_at=now,
     )
     db.add(base)
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="knowledge_base.created",
+        resource_type="knowledge_base",
+        resource_id=base.id,
+    )
     await db.commit()
     return _base_response(base)
 
@@ -214,6 +222,15 @@ async def add_document(
             "workspace_id": membership.workspace_id,
             "file_id": file_asset.id,
         },
+    )
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="knowledge_document.queued",
+        resource_type="knowledge_document",
+        resource_id=document.id,
+        metadata={"file_id": file_asset.id, "knowledge_base_id": base.id},
     )
     await db.commit()
     return KnowledgeDocumentResponse(

@@ -145,6 +145,15 @@ async def create_secret(
         updated_at=now,
     )
     db.add(record)
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="secret.created",
+        resource_type="secret",
+        resource_id=record.id,
+        metadata={"provider": record.provider},
+    )
     await db.commit()
     return SecretResponse.model_validate(record, from_attributes=True)
 
@@ -192,6 +201,14 @@ async def create_skill(
         created_at=now,
     )
     db.add_all([skill, version])
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="skill.created",
+        resource_type="skill",
+        resource_id=skill.id,
+    )
     await db.commit()
     return _skill(skill)
 
@@ -352,6 +369,14 @@ async def publish_skill_version(
     version.published_at = utc_now()
     skill.published_version_id = version.id
     skill.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="skill.published",
+        resource_type="skill_version",
+        resource_id=version.id,
+    )
     await db.commit()
     return _skill_version(version)
 
@@ -489,6 +514,15 @@ async def create_connector(
                 ),
             ]
         )
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="connector.created",
+        resource_type="connector",
+        resource_id=connector.id,
+        metadata={"provider": connector.provider},
+    )
     await db.commit()
     return _connector(connector)
 
@@ -553,6 +587,7 @@ async def create_data_source(
         owner_user_id=user.id,
         name=payload.name.strip(),
         provider=payload.provider,
+        visibility=payload.visibility,
         connection_config=payload.connection_config,
         secret_id=payload.secret_id,
         status="draft",
@@ -560,6 +595,15 @@ async def create_data_source(
         updated_at=now,
     )
     db.add(source)
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="data_source.created",
+        resource_type="data_source",
+        resource_id=source.id,
+        metadata={"provider": source.provider, "visibility": source.visibility},
+    )
     await db.commit()
     return _data_source(source)
 
@@ -944,6 +988,14 @@ async def publish_connector_version(
     version.published_at = utc_now()
     connector.published_version_id = version.id
     connector.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="connector.published",
+        resource_type="connector_version",
+        resource_id=version.id,
+    )
     await db.commit()
     return _connector_version(version)
 
@@ -976,6 +1028,14 @@ async def create_plugin(
         created_at=now,
     )
     db.add_all([plugin, version])
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="plugin.created",
+        resource_type="plugin",
+        resource_id=plugin.id,
+    )
     await db.commit()
     response = _plugin(plugin)
     response.draft_version_id = version.id
@@ -1311,6 +1371,14 @@ async def publish_plugin_version(
     version.published_at = utc_now()
     plugin.published_version_id = version.id
     plugin.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="plugin.published",
+        resource_type="plugin_version",
+        resource_id=version.id,
+    )
     await db.commit()
     return _plugin_version(version)
 

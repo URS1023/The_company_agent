@@ -303,6 +303,7 @@ async def execute_run(run_id: str) -> None:
             )
             answer = ""
             streamed_answer = False
+            model_usage: dict[str, int] = {"calls": 0}
             if tool_definitions:
                 for _ in range(8):
                     if (await db.get(Run, run.id)).status == "cancelled":
@@ -328,6 +329,11 @@ async def execute_run(run_id: str) -> None:
                     model_call.completed_at = utc_now()
                     usage = response.raw.get("usage") if isinstance(response.raw, dict) else None
                     model_call.usage_json = usage
+                    model_usage["calls"] += 1
+                    if isinstance(usage, dict):
+                        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                            if isinstance(usage.get(key), int):
+                                model_usage[key] = model_usage.get(key, 0) + usage[key]
                     await db.commit()
                     if not response.tool_calls:
                         answer = response.text
@@ -472,6 +478,7 @@ async def execute_run(run_id: str) -> None:
                 answer = "".join(chunks)
                 model_call.status = "completed"
                 model_call.completed_at = utc_now()
+                model_usage["calls"] += 1
                 await db.commit()
             if answer and not streamed_answer:
                 await append_run_event(
@@ -501,6 +508,7 @@ async def execute_run(run_id: str) -> None:
                 message_id=assistant_message.id,
                 citations=citations,
             )
+            run.model_usage = model_usage
             await update_run_status(
                 db,
                 run,

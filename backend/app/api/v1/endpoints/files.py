@@ -14,6 +14,7 @@ from backend.app.core.security import utc_now
 from backend.app.core.storage import LocalFileStorage, StorageError
 from backend.app.models.files import FileAsset
 from backend.app.schemas.files import FileResponse
+from backend.app.services.audit import record_audit
 from backend.app.services.auth import current_user_context
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -97,6 +98,15 @@ async def upload_file(
         created_at=now,
     )
     db.add(file_asset)
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="file.uploaded",
+        resource_type="file",
+        resource_id=file_asset.id,
+        metadata={"name": file_asset.name, "size": file_asset.size},
+    )
     await db.commit()
     return _response(file_asset)
 
@@ -166,6 +176,14 @@ async def delete_file(file_id: str, request: Request, db: AsyncSession = Depends
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
     file_asset.deleted_at = utc_now()
     LocalFileStorage().delete(file_asset.storage_key)
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="file.deleted",
+        resource_type="file",
+        resource_id=file_asset.id,
+    )
     await db.commit()
 
 

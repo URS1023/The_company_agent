@@ -37,6 +37,8 @@ class CreateRunRequest(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
     idempotency_key: str | None = Field(default=None, max_length=200)
     plugin_version_id: str | None = None
+    effective_config_hash: str | None = None
+    model_usage: dict | None = None
     file_ids: list[str] = Field(default_factory=list, max_length=20)
     knowledge_base_ids: list[str] = Field(default_factory=list, max_length=10)
     data_source_ids: list[str] = Field(default_factory=list, max_length=10)
