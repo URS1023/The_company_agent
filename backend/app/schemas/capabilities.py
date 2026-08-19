@@ -119,6 +119,16 @@ class DataSourceResponse(BaseModel):
     updated_at: datetime
 
 
+class ToolInvocationRequest(BaseModel):
+    arguments: dict = Field(default_factory=dict)
+
+
+class ToolTestResponse(BaseModel):
+    status: str
+    data: dict | list | str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
 __all__ = [
     "ConnectorResponse",
     "ConnectorVersionResponse",
@@ -133,4 +143,6 @@ __all__ = [
     "SecretResponse",
     "SkillResponse",
     "SkillVersionResponse",
+    "ToolInvocationRequest",
+    "ToolTestResponse",
 ]

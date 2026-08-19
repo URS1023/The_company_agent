@@ -32,8 +32,11 @@ from backend.app.schemas.capabilities import (
     SecretResponse,
     SkillResponse,
     SkillVersionResponse,
+    ToolInvocationRequest,
+    ToolTestResponse,
 )
 from backend.app.services.auth import current_user_context
+from backend.app.services.connectors import test_database_connection, test_http_connector
 
 router = APIRouter(tags=["capabilities"])
 
@@ -310,6 +313,70 @@ async def list_data_sources(
         )
     )
     return [_data_source(row) for row in rows]
+
+
+@router.post("/connector-versions/{version_id}/test-invocation", response_model=ToolTestResponse)
+async def test_connector_invocation(
+    version_id: str,
+    payload: ToolInvocationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ToolTestResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    version = await db.get(ConnectorVersion, version_id)
+    connector = await db.get(Connector, version.connector_id) if version else None
+    if not version or not connector or connector.workspace_id != membership.workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connector Version 不存在",
+        )
+    if connector.owner_user_id != user.id and membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无测试权限")
+    if connector.provider != "http":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="当前端点只测试 HTTP Connector",
+        )
+    try:
+        result = await test_http_connector(version, payload.arguments)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=type(exc).__name__,
+        ) from exc
+    return ToolTestResponse(**result)
+
+
+@router.post("/data-sources/{source_id}/test-connection", response_model=ToolTestResponse)
+async def test_source_connection(
+    source_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ToolTestResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    source = await db.scalar(
+        select(DataSource).where(
+            DataSource.id == source_id,
+            DataSource.workspace_id == membership.workspace_id,
+        )
+    )
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DataSource 不存在")
+    if source.owner_user_id != user.id and membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无测试权限")
+    secret = await db.get(SecretRecord, source.secret_id) if source.secret_id else None
+    try:
+        result = await test_database_connection(source, secret)
+    except Exception as exc:
+        source.status = "error"
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=type(exc).__name__,
+        ) from exc
+    source.status = "ready"
+    await db.commit()
+    return ToolTestResponse(**result)
 
 
 @router.get("/connectors", response_model=list[ConnectorResponse])
