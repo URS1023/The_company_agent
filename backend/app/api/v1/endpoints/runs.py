@@ -14,8 +14,10 @@ from backend.app.core.database import get_db
 from backend.app.core.ids import new_id
 from backend.app.core.security import utc_now
 from backend.app.models.runtime import Conversation, Message, Run, RunEvent
+from backend.app.schemas.capabilities import CapabilityProposalResponse
 from backend.app.schemas.chat import CreateRunRequest, RunResponse
 from backend.app.services.auth import current_user_context
+from backend.app.services.capability_builder import propose_from_user_intent
 from backend.app.services.runtime import (
     append_outbox_event,
     append_run_event,
@@ -119,6 +121,29 @@ async def create_run(
 async def get_run(run_id: str, request: Request, db: AsyncSession = Depends(get_db)) -> RunResponse:
     run, _ = await _owned_run(run_id, request, db)
     return _run_response(run)
+
+
+@router.post("/{run_id}/capability-proposals", response_model=CapabilityProposalResponse)
+async def capability_proposal(
+    run_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> CapabilityProposalResponse:
+    run, _ = await _owned_run(run_id, request, db)
+    message = await db.scalar(
+        select(Message)
+        .where(Message.conversation_id == run.conversation_id, Message.role == "user")
+        .order_by(Message.sequence.desc())
+    )
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="没有找到用户任务")
+    proposal = propose_from_user_intent(message.content)
+    return CapabilityProposalResponse(
+        capability_type=proposal.capability_type,
+        name=proposal.name,
+        reason=proposal.reason,
+        spec=proposal.spec,
+    )
 
 
 @router.get("/{run_id}/events")

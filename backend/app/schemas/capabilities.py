@@ -149,6 +149,13 @@ class PluginBindingRequest(BaseModel):
     resources: list[dict[str, str]] = Field(default_factory=list)
 
 
+class CapabilityProposalResponse(BaseModel):
+    capability_type: str
+    name: str
+    reason: str
+    spec: dict
+
+
 __all__ = [
     "ConnectorResponse",
     "ConnectorVersionResponse",
@@ -168,4 +175,5 @@ __all__ = [
     "VersionSpecRequest",
     "CapabilityTestRunResponse",
     "PluginBindingRequest",
+    "CapabilityProposalResponse",
 ]

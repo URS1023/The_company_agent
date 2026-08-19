@@ -39,3 +39,7 @@ def test_conversation_and_run_create_persists_event_and_outbox(
     assert run.status == "queued"
     assert any(event.event_type == "run.created" for event in events)
     assert any(item.payload["run_id"] == run_id for item in outbox)
+
+    proposal = client.post(f"/api/v1/runs/{run_id}/capability-proposals")
+    assert proposal.status_code == 200
+    assert proposal.json()["capability_type"] == "skill"
