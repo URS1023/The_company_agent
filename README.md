@@ -73,6 +73,12 @@ cd frontend
 .venv/Scripts/company-agent-bootstrap.exe --username workspace-admin
 ```
 
+也可以用一次性验证脚本完成迁移、管理员初始化和三个 Provider 的真实 Probe（管理员密码仍以交互方式读取）：
+
+```powershell
+./scripts/verify-native.ps1 -AdminUsername workspace-admin
+```
+
 启动前端：
 
 ```powershell
