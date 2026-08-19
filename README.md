@@ -48,6 +48,15 @@
 .venv/Scripts/company-agent-ingest.exe
 ```
 
+配置好 `.env.local` 后，也可以由脚本统一启动/停止本项目自己的进程：
+
+```powershell
+./scripts/start-native.ps1
+./scripts/stop-native.ps1
+```
+
+脚本不会启动、停止或修改现有 MySQL、Redis、Elasticsearch 服务。
+
 数据库迁移和首个管理员创建需要先确认 `.env.local` 中的 MySQL 连接可用：
 
 ```powershell
