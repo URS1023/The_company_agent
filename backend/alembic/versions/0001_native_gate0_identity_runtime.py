@@ -126,6 +126,8 @@ def upgrade() -> None:
             "conversation_id", sa.String(26), sa.ForeignKey("conversations.id"), nullable=False
         ),
         sa.Column("started_by_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        # Plugin versions are declared later; the ORM provides the relation.
+        sa.Column("plugin_version_id", sa.String(26)),
         sa.Column("status", sa.String(32), nullable=False),
         sa.Column("idempotency_key", sa.String(200)),
         sa.Column("effective_config_hash", sa.String(128)),

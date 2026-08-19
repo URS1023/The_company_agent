@@ -8,6 +8,7 @@ from sqlalchemy import select
 from backend.app.core.database import Base, SessionLocal, engine
 from backend.app.core.ids import new_id
 from backend.app.core.security import hash_password, utc_now
+from backend.app.main import app
 from backend.app.models.identity import (
     AuthIdentity,
     LocalCredential,
@@ -17,7 +18,6 @@ from backend.app.models.identity import (
     Workspace,
     WorkspaceMember,
 )
-from backend.app.main import app
 
 
 async def seed() -> None:
@@ -37,7 +37,13 @@ async def seed() -> None:
         workspace = Workspace(
             id=new_id(), organization_id=organization.id, name="E2E 工作区", created_at=now
         )
-        user = User(id=new_id(), display_name="E2E 管理员", status="active", created_at=now, updated_at=now)
+        user = User(
+            id=new_id(),
+            display_name="E2E 管理员",
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
         identity = AuthIdentity(
             id=new_id(),
             user_id=user.id,
@@ -60,10 +66,18 @@ async def seed() -> None:
                 identity,
                 credential,
                 OrganizationMember(
-                    id=new_id(), organization_id=organization.id, user_id=user.id, role="admin", created_at=now
+                    id=new_id(),
+                    organization_id=organization.id,
+                    user_id=user.id,
+                    role="admin",
+                    created_at=now,
                 ),
                 WorkspaceMember(
-                    id=new_id(), workspace_id=workspace.id, user_id=user.id, role="admin", created_at=now
+                    id=new_id(),
+                    workspace_id=workspace.id,
+                    user_id=user.id,
+                    role="admin",
+                    created_at=now,
                 ),
             ]
         )

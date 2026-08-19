@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.database import get_db
 from backend.app.core.ids import new_id
 from backend.app.core.security import utc_now
+from backend.app.models.capabilities import Plugin, PluginVersion
 from backend.app.models.runtime import Conversation, Message, Run, RunEvent
 from backend.app.schemas.capabilities import CapabilityProposalResponse
 from backend.app.schemas.chat import CreateRunRequest, RunResponse
@@ -66,6 +67,20 @@ async def create_run(
     )
     if not conversation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="对话不存在")
+    plugin_version = None
+    if payload.plugin_version_id:
+        plugin_version = await db.get(PluginVersion, payload.plugin_version_id)
+        plugin = await db.get(Plugin, plugin_version.plugin_id) if plugin_version else None
+        if (
+            not plugin_version
+            or not plugin
+            or plugin.workspace_id != membership.workspace_id
+            or plugin_version.status != "published"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="只能使用当前 Workspace 的 Published Plugin Version",
+            )
     if payload.idempotency_key:
         existing = await db.scalar(
             select(Run).where(
@@ -82,6 +97,7 @@ async def create_run(
         workspace_id=membership.workspace_id,
         conversation_id=conversation.id,
         started_by_user_id=user.id,
+        plugin_version_id=plugin_version.id if plugin_version else None,
         status="queued",
         idempotency_key=payload.idempotency_key,
         created_at=now,

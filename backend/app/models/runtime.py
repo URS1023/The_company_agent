@@ -46,6 +46,7 @@ class Run(Base):
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), nullable=False)
     started_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    plugin_version_id: Mapped[str | None] = mapped_column(ForeignKey("plugin_versions.id"))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="created")
     idempotency_key: Mapped[str | None] = mapped_column(String(200))
     effective_config_hash: Mapped[str | None] = mapped_column(String(128))

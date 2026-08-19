@@ -21,6 +21,7 @@ class ConversationResponse(BaseModel):
 class CreateRunRequest(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
     idempotency_key: str | None = Field(default=None, max_length=200)
+    plugin_version_id: str | None = None
 
 
 class RunResponse(BaseModel):

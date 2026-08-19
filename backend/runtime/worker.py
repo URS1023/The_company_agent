@@ -14,9 +14,17 @@ from backend.app.core.external_services import redis_client
 from backend.app.core.ids import new_id
 from backend.app.core.logging import configure_logging
 from backend.app.core.security import utc_now
+from backend.app.models.capabilities import (
+    ConnectorVersion,
+    PluginToolBinding,
+    PluginVersion,
+    ToolVersion,
+)
 from backend.app.models.runtime import Message, OutboxEvent, Run
 from backend.app.providers.compatible import ProviderConfigurationError, agnes_client
+from backend.app.services.connectors import test_http_connector
 from backend.app.services.runtime import append_run_event, next_message_sequence, update_run_status
+from backend.app.tools.builtin import analyze_bidding, analyze_finance
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +66,72 @@ async def relay_forever() -> None:
         except Exception:
             logger.exception("outbox relay failed")
             await asyncio.sleep(2)
+
+
+async def load_tool_context(db, run: Run) -> tuple[list[dict], dict[str, ToolVersion]]:
+    if not run.plugin_version_id:
+        return [], {}
+    plugin_version = await db.get(PluginVersion, run.plugin_version_id)
+    if not plugin_version or plugin_version.status != "published":
+        return [], {}
+    bindings = list(
+        await db.scalars(
+            select(PluginToolBinding).where(
+                PluginToolBinding.plugin_version_id == plugin_version.id
+            )
+        )
+    )
+    definitions: list[dict] = []
+    versions: dict[str, ToolVersion] = {}
+    for binding in bindings:
+        tool_version = await db.get(ToolVersion, binding.tool_version_id)
+        if not tool_version or tool_version.status not in {"published", "draft"}:
+            continue
+        spec = tool_version.spec or {}
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": spec.get("name", tool_version.id),
+                    "description": spec.get("description", ""),
+                    "parameters": spec.get("input_schema", {"type": "object"}),
+                },
+            }
+        )
+        versions[spec.get("name", tool_version.id)] = tool_version
+    return definitions, versions
+
+
+async def dispatch_builtin(tool_version: ToolVersion, arguments: dict) -> dict:
+    operation = str((tool_version.spec or {}).get("operation", ""))
+    if operation == "finance.analyze":
+        return analyze_finance(rows=arguments.get("rows", []), budget=arguments.get("budget", 0))
+    if operation == "bidding.analyze":
+        result = analyze_bidding(
+            project_name=arguments.get("project_name", ""),
+            requirements=arguments.get("requirements", []),
+            knowledge_text=arguments.get("knowledge_text", ""),
+            template_sections=arguments.get("template_sections"),
+        )
+        return {
+            "requirement_spec": result.requirement_spec,
+            "missing": result.missing,
+            "document_spec": result.document_spec,
+        }
+    raise ValueError("unknown builtin tool operation")
+
+
+async def dispatch_tool(db, tool_version: ToolVersion, arguments: dict) -> dict:
+    spec = tool_version.spec or {}
+    provider = spec.get("provider", "builtin")
+    if provider == "builtin":
+        return await dispatch_builtin(tool_version, arguments)
+    if provider == "http":
+        connector_version = await db.get(ConnectorVersion, tool_version.connector_version_id)
+        if not connector_version:
+            raise ValueError("connector version not found")
+        return await test_http_connector(connector_version, arguments)
+    raise ValueError(f"native worker does not support provider {provider}")
 
 
 async def ensure_group(client: Any) -> None:
@@ -109,21 +183,91 @@ async def execute_run(run_id: str) -> None:
             return
         try:
             client = agnes_client()
-            chunks: list[str] = []
-            async for text in client.stream_chat(
-                model=settings.agnes_model,
-                messages=[{"role": "user", "content": user_message.content}],
-            ):
-                chunks.append(text)
+            tool_definitions, tool_versions = await load_tool_context(db, run)
+            messages: list[dict[str, Any]] = [{"role": "user", "content": user_message.content}]
+            answer = ""
+            streamed_answer = False
+            if tool_definitions:
+                for _ in range(8):
+                    response = await client.chat(
+                        model=settings.agnes_model,
+                        messages=messages,
+                        tools=tool_definitions,
+                    )
+                    if not response.tool_calls:
+                        answer = response.text
+                        break
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": response.text or "",
+                            "tool_calls": response.tool_calls,
+                        }
+                    )
+                    for call in response.tool_calls:
+                        function = call.get("function", {})
+                        tool_name = function.get("name", "")
+                        raw_arguments = function.get("arguments", "{}")
+                        arguments = (
+                            json.loads(raw_arguments)
+                            if isinstance(raw_arguments, str)
+                            else raw_arguments
+                        )
+                        await append_run_event(
+                            db,
+                            workspace_id=run.workspace_id,
+                            run_id=run.id,
+                            event_type="tool.started",
+                            payload={"tool": tool_name},
+                        )
+                        tool_version = tool_versions.get(tool_name)
+                        if not tool_version:
+                            result = {"status": "failed", "error": "tool is not published"}
+                        else:
+                            result = await dispatch_tool(db, tool_version, arguments)
+                        await append_run_event(
+                            db,
+                            workspace_id=run.workspace_id,
+                            run_id=run.id,
+                            event_type="tool.completed",
+                            payload={"tool": tool_name, "status": result.get("status", "success")},
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call.get("id", tool_name),
+                                "name": tool_name,
+                                "content": json.dumps(result, ensure_ascii=False),
+                            }
+                        )
+                    await db.commit()
+                if not answer:
+                    raise RuntimeError("agent tool loop exceeded maximum steps")
+            else:
+                streamed_answer = True
+                chunks: list[str] = []
+                async for text in client.stream_chat(
+                    model=settings.agnes_model,
+                    messages=messages,
+                ):
+                    chunks.append(text)
+                    await append_run_event(
+                        db,
+                        workspace_id=run.workspace_id,
+                        run_id=run.id,
+                        event_type="message.delta",
+                        payload={"text": text},
+                    )
+                    await db.commit()
+                answer = "".join(chunks)
+            if answer and not streamed_answer:
                 await append_run_event(
                     db,
                     workspace_id=run.workspace_id,
                     run_id=run.id,
                     event_type="message.delta",
-                    payload={"text": text},
+                    payload={"text": answer},
                 )
-                await db.commit()
-            answer = "".join(chunks)
             db.add(
                 Message(
                     id=new_id(),
