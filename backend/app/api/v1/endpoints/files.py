@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from mimetypes import guess_type
 from pathlib import PurePath
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -17,6 +18,23 @@ from backend.app.services.auth import current_user_context
 
 router = APIRouter(prefix="/files", tags=["files"])
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+ALLOWED_SUFFIXES = {
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".xlsm",
+    ".csv",
+    ".tsv",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".json",
+    ".pptx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+}
 
 
 def _safe_name(value: str | None) -> str:
@@ -44,6 +62,18 @@ async def upload_file(
         )
     file_id = new_id()
     name = _safe_name(upload.filename)
+    suffix = PurePath(name).suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="不支持的文件格式；支持 PDF、DOCX、XLSX、CSV、TXT、PPTX 和图片",
+        )
+    guessed_mime = guess_type(name)[0]
+    content_type = upload.content_type or guessed_mime or "application/octet-stream"
+    if suffix in {".png", ".jpg", ".jpeg", ".webp"} and not content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="图片 MIME 类型不正确"
+        )
     storage_key = f"workspaces/{membership.workspace_id}/files/{file_id}/{name}"
     try:
         metadata = LocalFileStorage().put_bytes(storage_key, content)
@@ -58,7 +88,7 @@ async def upload_file(
         workspace_id=membership.workspace_id,
         owner_user_id=user.id,
         name=name,
-        mime_type=upload.content_type or "application/octet-stream",
+        mime_type=content_type,
         size=int(metadata["size"]),
         storage_key=storage_key,
         sha256=str(metadata["sha256"]),
@@ -69,6 +99,22 @@ async def upload_file(
     db.add(file_asset)
     await db.commit()
     return _response(file_asset)
+
+
+@router.post("/batch", response_model=list[FileResponse], status_code=status.HTTP_201_CREATED)
+async def upload_files_batch(
+    request: Request,
+    uploads: list[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> list[FileResponse]:
+    if not uploads or len(uploads) > 20:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="单次最多上传 20 个文件"
+        )
+    results: list[FileResponse] = []
+    for upload in uploads:
+        results.append(await upload_file(request, upload, db))
+    return results
 
 
 @router.get("", response_model=list[FileResponse])

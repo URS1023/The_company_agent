@@ -2,7 +2,10 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  fullyParallel: true,
+  // The native E2E server intentionally uses one SQLite file; serialize tests
+  // so the browser suite exercises product behavior rather than SQLite locks.
+  fullyParallel: false,
+  workers: 1,
   timeout: 30_000,
   reporter: [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]],
   use: {

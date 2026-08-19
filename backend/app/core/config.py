@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     session_cookie_name: str = "company_agent_session"
     session_idle_seconds: int = 8 * 60 * 60
     session_absolute_seconds: int = 7 * 24 * 60 * 60
+    login_max_failures: int = 5
+    login_lockout_seconds: int = 15 * 60
 
     mysql_url: str = "mysql+asyncmy://127.0.0.1:3306/company_agent"
     mysql_pool_size: int = 5
@@ -54,6 +56,10 @@ class Settings(BaseSettings):
     allow_external_chat: bool = False
     allow_external_vision: bool = False
     allow_external_embedding: bool = False
+    allow_trusted_sandbox: bool = True
+    allow_arbitrary_python: bool = False
+    sandbox_timeout_seconds: int = 30
+    sandbox_max_output_bytes: int = 10 * 1024 * 1024
 
     web_origins: list[str] = ["http://127.0.0.1:3000", "http://localhost:3000"]
 

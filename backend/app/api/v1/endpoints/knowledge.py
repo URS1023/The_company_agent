@@ -20,7 +20,9 @@ from backend.app.schemas.knowledge import (
     KnowledgeSearchHit,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
+    UpdateKnowledgeBaseRequest,
 )
+from backend.app.services.audit import record_audit
 from backend.app.services.auth import current_user_context
 from backend.app.services.runtime import append_outbox_event
 
@@ -69,6 +71,90 @@ async def create_knowledge_base(
     db.add(base)
     await db.commit()
     return _base_response(base)
+
+
+@router.get("/{knowledge_base_id}", response_model=KnowledgeBaseResponse)
+async def get_knowledge_base(
+    knowledge_base_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> KnowledgeBaseResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    base = await db.scalar(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.workspace_id == membership.workspace_id,
+            (KnowledgeBase.owner_user_id == user.id)
+            | (KnowledgeBase.visibility == "workspace")
+            | (membership.role == "admin"),
+        )
+    )
+    if not base:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
+    return _base_response(base)
+
+
+@router.patch("/{knowledge_base_id}", response_model=KnowledgeBaseResponse)
+async def update_knowledge_base(
+    knowledge_base_id: str,
+    payload: UpdateKnowledgeBaseRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeBaseResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    base = await db.scalar(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.workspace_id == membership.workspace_id,
+            KnowledgeBase.owner_user_id == user.id,
+            KnowledgeBase.status == "active",
+        )
+    )
+    if not base:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
+    if payload.name is not None:
+        base.name = payload.name.strip() or base.name
+    if payload.description is not None:
+        base.description = payload.description.strip()
+    if payload.visibility is not None:
+        base.visibility = payload.visibility
+    base.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="knowledge_base.updated",
+        resource_type="knowledge_base",
+        resource_id=base.id,
+    )
+    await db.commit()
+    return _base_response(base)
+
+
+@router.delete("/{knowledge_base_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_knowledge_base(
+    knowledge_base_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> None:
+    user, _, _, membership = await current_user_context(request, db)
+    base = await db.scalar(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.workspace_id == membership.workspace_id,
+            KnowledgeBase.owner_user_id == user.id,
+            KnowledgeBase.status == "active",
+        )
+    )
+    if not base:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
+    base.status = "archived"
+    base.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="knowledge_base.archived",
+        resource_type="knowledge_base",
+        resource_id=base.id,
+    )
+    await db.commit()
 
 
 @router.post(
@@ -181,6 +267,97 @@ async def list_documents(
     ]
 
 
+@router.delete(
+    "/{knowledge_base_id}/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_document(
+    knowledge_base_id: str,
+    document_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    user, _, _, membership = await current_user_context(request, db)
+    base = await db.scalar(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.workspace_id == membership.workspace_id,
+            (KnowledgeBase.owner_user_id == user.id) | (membership.role == "admin"),
+        )
+    )
+    document = await db.scalar(
+        select(KnowledgeDocument).where(
+            KnowledgeDocument.id == document_id,
+            KnowledgeDocument.knowledge_base_id == knowledge_base_id,
+            KnowledgeDocument.workspace_id == membership.workspace_id,
+        )
+    )
+    if not base or not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库文档不存在")
+    document.status = "deleted"
+    document.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="knowledge_document.deleted",
+        resource_type="knowledge_document",
+        resource_id=document.id,
+    )
+    await db.commit()
+
+
+@router.post("/{knowledge_base_id}/reindex", status_code=status.HTTP_202_ACCEPTED)
+async def reindex_knowledge_base(
+    knowledge_base_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict[str, object]:
+    user, _, _, membership = await current_user_context(request, db)
+    base = await db.scalar(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.workspace_id == membership.workspace_id,
+            (KnowledgeBase.owner_user_id == user.id)
+            | (KnowledgeBase.visibility == "workspace")
+            | (membership.role == "admin"),
+            KnowledgeBase.status == "active",
+        )
+    )
+    if not base:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
+    documents = list(
+        await db.scalars(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.knowledge_base_id == base.id,
+                KnowledgeDocument.status != "deleted",
+            )
+        )
+    )
+    for document in documents:
+        document.status = "queued"
+        document.error_summary = None
+        document.updated_at = utc_now()
+        await append_outbox_event(
+            db,
+            topic="knowledge.document.created",
+            payload={
+                "document_id": document.id,
+                "knowledge_base_id": base.id,
+                "workspace_id": membership.workspace_id,
+                "file_id": document.file_id,
+            },
+        )
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="knowledge_base.reindexed",
+        resource_type="knowledge_base",
+        resource_id=base.id,
+        metadata={"document_count": len(documents)},
+    )
+    await db.commit()
+    return {"knowledge_base_id": base.id, "queued_documents": len(documents)}
+
+
 @router.post("/{knowledge_base_id}/search", response_model=KnowledgeSearchResponse)
 async def search_knowledge(
     knowledge_base_id: str,
@@ -215,17 +392,69 @@ async def search_knowledge(
         query_vector=vectors[0],
         k=payload.top_k,
     )
-    return KnowledgeSearchResponse(
-        query=payload.query,
-        hits=[
+    chunk_ids = [str(hit.get("chunk_id", "")) for hit in hits if hit.get("chunk_id")]
+    chunk_rows = (
+        list(
+            await db.scalars(
+                select(KnowledgeChunk).where(
+                    KnowledgeChunk.id.in_(chunk_ids),
+                    KnowledgeChunk.workspace_id == membership.workspace_id,
+                )
+            )
+        )
+        if chunk_ids
+        else []
+    )
+    chunk_map = {chunk.id: chunk for chunk in chunk_rows}
+    file_map: dict[str, FileAsset] = {}
+    file_ids = [chunk.document_id for chunk in chunk_rows]
+    document_rows = (
+        list(
+            await db.scalars(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.id.in_(file_ids),
+                    KnowledgeDocument.workspace_id == membership.workspace_id,
+                )
+            )
+        )
+        if file_ids
+        else []
+    )
+    actual_file_ids = [document.file_id for document in document_rows]
+    if actual_file_ids:
+        file_map = {
+            file.id: file
+            for file in await db.scalars(
+                select(FileAsset).where(
+                    FileAsset.id.in_(actual_file_ids),
+                    FileAsset.workspace_id == membership.workspace_id,
+                )
+            )
+        }
+    document_file_map = {document.id: document.file_id for document in document_rows}
+    file_for_chunk: dict[str, tuple[str, str]] = {}
+    for chunk_id, chunk in chunk_map.items():
+        file_id = document_file_map.get(chunk.document_id)
+        file = file_map.get(file_id or "")
+        if file:
+            file_for_chunk[chunk_id] = (file.id, file.name)
+    search_hits: list[KnowledgeSearchHit] = []
+    for hit in hits:
+        chunk_id = str(hit.get("chunk_id", ""))
+        file_id, file_name = file_for_chunk.get(chunk_id, (None, None))
+        search_hits.append(
             KnowledgeSearchHit(
-                chunk_id=str(hit.get("chunk_id", "")),
+                chunk_id=chunk_id,
                 text=str(hit.get("content", "")),
                 score=hit.get("score"),
                 location=hit.get("location") or {},
+                file_id=file_id,
+                file_name=file_name,
             )
-            for hit in hits
-        ],
+        )
+    return KnowledgeSearchResponse(
+        query=payload.query,
+        hits=search_hits,
     )
 
 

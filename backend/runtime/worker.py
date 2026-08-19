@@ -13,18 +13,36 @@ from backend.app.core.database import SessionLocal
 from backend.app.core.external_services import redis_client
 from backend.app.core.ids import new_id
 from backend.app.core.logging import configure_logging
+from backend.app.core.secrets import SecretManager
 from backend.app.core.security import utc_now
 from backend.app.models.capabilities import (
+    Connector,
     ConnectorVersion,
+    DataSource,
     PluginToolBinding,
     PluginVersion,
+    SecretRecord,
+    Tool,
     ToolVersion,
 )
-from backend.app.models.runtime import Message, OutboxEvent, Run
-from backend.app.providers.compatible import ProviderConfigurationError, agnes_client
-from backend.app.services.connectors import test_http_connector
-from backend.app.services.runtime import append_run_event, next_message_sequence, update_run_status
+from backend.app.models.runtime import Message, ModelCall, OutboxEvent, Run, ToolCall
+from backend.app.providers.compatible import ProviderConfigurationError
+from backend.app.providers.gateway import ModelGateway
+from backend.app.services.connectors import invoke_database_tool, test_http_connector
+from backend.app.services.context import persist_citations, resolve_context
+from backend.app.services.parameter_compiler import compile_arguments
+from backend.app.services.runtime import (
+    append_run_event,
+    complete_run_step,
+    create_run_step,
+    next_message_sequence,
+    update_run_status,
+)
 from backend.app.tools.builtin import analyze_bidding, analyze_finance
+from backend.app.tools.gateway import validate_source_policy
+from backend.app.tools.http import validate_target
+from backend.app.tools.mcp import StreamableHttpMcpClient
+from backend.app.tools.sandbox import run_trusted_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -69,37 +87,93 @@ async def relay_forever() -> None:
 
 
 async def load_tool_context(db, run: Run) -> tuple[list[dict], dict[str, ToolVersion]]:
-    if not run.plugin_version_id:
-        return [], {}
-    plugin_version = await db.get(PluginVersion, run.plugin_version_id)
-    if not plugin_version or plugin_version.status != "published":
-        return [], {}
-    bindings = list(
-        await db.scalars(
-            select(PluginToolBinding).where(
-                PluginToolBinding.plugin_version_id == plugin_version.id
+    bindings: list[PluginToolBinding] = []
+    direct_versions: list[ToolVersion] = []
+    if run.plugin_version_id:
+        plugin_version = await db.get(PluginVersion, run.plugin_version_id)
+        if plugin_version and plugin_version.status == "published":
+            bindings.extend(
+                list(
+                    await db.scalars(
+                        select(PluginToolBinding).where(
+                            PluginToolBinding.plugin_version_id == plugin_version.id
+                        )
+                    )
+                )
+            )
+    selected_connector_ids = (run.context_snapshot or {}).get("connector_version_ids", [])
+    if selected_connector_ids:
+        direct_versions.extend(
+            list(
+                await db.scalars(
+                    select(ToolVersion).where(
+                        ToolVersion.connector_version_id.in_(selected_connector_ids),
+                        ToolVersion.status == "published",
+                    )
+                )
             )
         )
-    )
     definitions: list[dict] = []
     versions: dict[str, ToolVersion] = {}
+    seen: set[str] = set()
+    tool_versions = list(direct_versions)
     for binding in bindings:
         tool_version = await db.get(ToolVersion, binding.tool_version_id)
+        if tool_version:
+            tool_versions.append(tool_version)
+    for tool_version in tool_versions:
         if not tool_version or tool_version.status not in {"published", "draft"}:
             continue
+        tool = await db.get(Tool, tool_version.tool_id)
+        if not tool or tool.status != "active":
+            continue
         spec = tool_version.spec or {}
+        tool_name = str(spec.get("name", tool_version.id))
+        if tool_name in seen:
+            continue
+        seen.add(tool_name)
         definitions.append(
             {
                 "type": "function",
                 "function": {
-                    "name": spec.get("name", tool_version.id),
+                    "name": tool_name,
                     "description": spec.get("description", ""),
                     "parameters": spec.get("input_schema", {"type": "object"}),
                 },
             }
         )
-        versions[spec.get("name", tool_version.id)] = tool_version
+        versions[tool_name] = tool_version
     return definitions, versions
+
+
+async def load_secret(db, secret_id: str | None, workspace_id: str) -> SecretRecord | None:
+    if not secret_id:
+        return None
+    return await db.scalar(
+        select(SecretRecord).where(
+            SecretRecord.id == secret_id,
+            SecretRecord.workspace_id == workspace_id,
+            SecretRecord.deleted_at.is_(None),
+        )
+    )
+
+
+def secret_headers(secret: SecretRecord | None, spec: dict) -> dict[str, str]:
+    headers = {str(key): str(value) for key, value in (spec.get("headers") or {}).items()}
+    if not secret:
+        return headers
+    values = SecretManager().decrypt(secret.nonce, secret.ciphertext)
+    auth_type = str(spec.get("auth_type", "bearer")).lower()
+    if auth_type == "api_key" and values.get("api_key"):
+        headers[str(spec.get("api_key_header", "X-API-Key"))] = values["api_key"]
+    elif auth_type == "basic" and values.get("username") and values.get("password"):
+        import base64
+
+        token = base64.b64encode(f"{values['username']}:{values['password']}".encode()).decode()
+        headers["Authorization"] = f"Basic {token}"
+    elif values.get("token"):
+        headers["Authorization"] = f"Bearer {values['token']}"
+    return headers
 
 
 async def dispatch_builtin(tool_version: ToolVersion, arguments: dict) -> dict:
@@ -121,16 +195,56 @@ async def dispatch_builtin(tool_version: ToolVersion, arguments: dict) -> dict:
     raise ValueError("unknown builtin tool operation")
 
 
-async def dispatch_tool(db, tool_version: ToolVersion, arguments: dict) -> dict:
+async def dispatch_tool(db, run: Run, tool_version: ToolVersion, arguments: dict) -> dict:
     spec = tool_version.spec or {}
-    provider = spec.get("provider", "builtin")
+    arguments = compile_arguments(
+        arguments,
+        spec.get("input_schema") or {"type": "object"},
+        defaults=spec.get("defaults") or {},
+    )
+    validate_source_policy(arguments, spec.get("field_source_policy"))
+    arguments = {key: value for key, value in arguments.items() if not key.startswith("__")}
+    connector_version = await db.get(ConnectorVersion, tool_version.connector_version_id)
+    connector = (
+        await db.get(Connector, connector_version.connector_id) if connector_version else None
+    )
+    provider = spec.get("provider") or (connector.provider if connector else "builtin")
     if provider == "builtin":
         return await dispatch_builtin(tool_version, arguments)
+    if provider == "sandbox":
+        return await run_trusted_sandbox(str(spec.get("operation", "")), arguments)
     if provider == "http":
-        connector_version = await db.get(ConnectorVersion, tool_version.connector_version_id)
         if not connector_version:
             raise ValueError("connector version not found")
-        return await test_http_connector(connector_version, arguments)
+        secret_id = spec.get("secret_id") or (connector_version.spec or {}).get("secret_id")
+        secret = await load_secret(db, secret_id, run.workspace_id)
+        return await test_http_connector(connector_version, arguments, secret)
+    if provider == "database":
+        source_id = spec.get("data_source_id") or arguments.get("data_source_id")
+        if not source_id:
+            selected = (run.context_snapshot or {}).get("data_source_ids", [])
+            source_id = selected[0] if selected else None
+        source = await db.scalar(
+            select(DataSource).where(
+                DataSource.id == source_id,
+                DataSource.workspace_id == run.workspace_id,
+            )
+        )
+        if not source:
+            raise ValueError("database data source not found")
+        secret = await db.get(SecretRecord, source.secret_id) if source.secret_id else None
+        operation = str(spec.get("operation") or spec.get("name") or "database.query")
+        return await invoke_database_tool(source, secret, operation, arguments)
+    if provider == "mcp":
+        if not connector_version:
+            raise ValueError("connector version not found")
+        endpoint = str(spec.get("endpoint") or (connector_version.spec or {}).get("endpoint") or "")
+        validate_target(endpoint, allow_private=bool(spec.get("allow_private", False)))
+        secret_id = spec.get("secret_id") or (connector_version.spec or {}).get("secret_id")
+        secret = await load_secret(db, secret_id, run.workspace_id)
+        client = StreamableHttpMcpClient(endpoint, headers=secret_headers(secret, spec))
+        await client.initialize()
+        return await client.call_tool(str(spec.get("name", tool_version.id)), arguments)
     raise ValueError(f"native worker does not support provider {provider}")
 
 
@@ -182,18 +296,39 @@ async def execute_run(run_id: str) -> None:
             await db.commit()
             return
         try:
-            client = agnes_client()
+            client = ModelGateway()
             tool_definitions, tool_versions = await load_tool_context(db, run)
-            messages: list[dict[str, Any]] = [{"role": "user", "content": user_message.content}]
+            messages, citations = await resolve_context(
+                db, run=run, user_message=user_message.content
+            )
             answer = ""
             streamed_answer = False
             if tool_definitions:
                 for _ in range(8):
-                    response = await client.chat(
+                    if (await db.get(Run, run.id)).status == "cancelled":
+                        return
+                    model_call = ModelCall(
+                        id=new_id(),
+                        workspace_id=run.workspace_id,
+                        run_id=run.id,
+                        provider="agnes",
                         model=settings.agnes_model,
+                        status="running",
+                        metadata_json={"tool_count": len(tool_definitions)},
+                        started_at=utc_now(),
+                    )
+                    db.add(model_call)
+                    await db.commit()
+                    response = await client.chat(
+                        profile="reasoning",
                         messages=messages,
                         tools=tool_definitions,
                     )
+                    model_call.status = "completed"
+                    model_call.completed_at = utc_now()
+                    usage = response.raw.get("usage") if isinstance(response.raw, dict) else None
+                    model_call.usage_json = usage
+                    await db.commit()
                     if not response.tool_calls:
                         answer = response.text
                         break
@@ -213,24 +348,87 @@ async def execute_run(run_id: str) -> None:
                             if isinstance(raw_arguments, str)
                             else raw_arguments
                         )
+                        step = await create_run_step(
+                            db,
+                            run=run,
+                            step_type="tool",
+                            name=tool_name,
+                            input_json=arguments,
+                        )
+                        tool_call = ToolCall(
+                            id=new_id(),
+                            workspace_id=run.workspace_id,
+                            run_id=run.id,
+                            step_id=step.id,
+                            tool_version_id=tool_versions.get(tool_name).id
+                            if tool_versions.get(tool_name)
+                            else None,
+                            tool_name=tool_name,
+                            arguments_json=arguments,
+                            status="running",
+                            idempotency_key=f"{run.id}:{step.sequence}:{tool_name}",
+                            started_at=utc_now(),
+                        )
+                        db.add(tool_call)
+                        await db.flush()
                         await append_run_event(
                             db,
                             workspace_id=run.workspace_id,
                             run_id=run.id,
                             event_type="tool.started",
-                            payload={"tool": tool_name},
+                            payload={
+                                "tool": tool_name,
+                                "step_id": step.id,
+                                "tool_call_id": tool_call.id,
+                            },
                         )
                         tool_version = tool_versions.get(tool_name)
-                        if not tool_version:
-                            result = {"status": "failed", "error": "tool is not published"}
-                        else:
-                            result = await dispatch_tool(db, tool_version, arguments)
+                        try:
+                            if not tool_version:
+                                raise ValueError("tool is not published")
+                            result = await dispatch_tool(db, run, tool_version, arguments)
+                        except Exception as tool_exc:
+                            tool_call.status = "failed"
+                            tool_call.error_code = type(tool_exc).__name__
+                            tool_call.error_summary = str(tool_exc)[:1000]
+                            tool_call.completed_at = utc_now()
+                            await complete_run_step(
+                                db,
+                                step=step,
+                                status="failed",
+                                error_code=type(tool_exc).__name__,
+                                error_summary=str(tool_exc)[:1000],
+                            )
+                            await append_run_event(
+                                db,
+                                workspace_id=run.workspace_id,
+                                run_id=run.id,
+                                event_type="tool.failed",
+                                payload={
+                                    "tool": tool_name,
+                                    "step_id": step.id,
+                                    "error": str(tool_exc)[:1000],
+                                },
+                            )
+                            await db.commit()
+                            raise
+                        tool_call.status = "completed"
+                        tool_call.result_json = result
+                        tool_call.completed_at = utc_now()
+                        await complete_run_step(
+                            db, step=step, status="completed", output_json=result
+                        )
                         await append_run_event(
                             db,
                             workspace_id=run.workspace_id,
                             run_id=run.id,
                             event_type="tool.completed",
-                            payload={"tool": tool_name, "status": result.get("status", "success")},
+                            payload={
+                                "tool": tool_name,
+                                "step_id": step.id,
+                                "tool_call_id": tool_call.id,
+                                "status": result.get("status", "success"),
+                            },
                         )
                         messages.append(
                             {
@@ -246,8 +444,20 @@ async def execute_run(run_id: str) -> None:
             else:
                 streamed_answer = True
                 chunks: list[str] = []
-                async for text in client.stream_chat(
+                model_call = ModelCall(
+                    id=new_id(),
+                    workspace_id=run.workspace_id,
+                    run_id=run.id,
+                    provider="agnes",
                     model=settings.agnes_model,
+                    status="running",
+                    metadata_json={"stream": True},
+                    started_at=utc_now(),
+                )
+                db.add(model_call)
+                await db.commit()
+                async for text in client.stream_chat(
+                    profile="reasoning",
                     messages=messages,
                 ):
                     chunks.append(text)
@@ -260,6 +470,9 @@ async def execute_run(run_id: str) -> None:
                     )
                     await db.commit()
                 answer = "".join(chunks)
+                model_call.status = "completed"
+                model_call.completed_at = utc_now()
+                await db.commit()
             if answer and not streamed_answer:
                 await append_run_event(
                     db,
@@ -269,7 +482,7 @@ async def execute_run(run_id: str) -> None:
                     payload={"text": answer},
                 )
             db.add(
-                Message(
+                assistant_message := Message(
                     id=new_id(),
                     workspace_id=run.workspace_id,
                     conversation_id=run.conversation_id,
@@ -277,8 +490,16 @@ async def execute_run(run_id: str) -> None:
                     sequence=await next_message_sequence(db, run.conversation_id),
                     content=answer,
                     status="completed",
+                    parts_json=[{"type": "text", "text": answer}],
                     created_at=utc_now(),
                 )
+            )
+            await db.flush()
+            await persist_citations(
+                db,
+                run=run,
+                message_id=assistant_message.id,
+                citations=citations,
             )
             await update_run_status(
                 db,
@@ -298,7 +519,7 @@ async def execute_run(run_id: str) -> None:
                 error_summary="Agnes API Key 尚未配置",
             )
             await db.commit()
-        except Exception:
+        except Exception as exc:
             logger.exception("run execution failed run_id=%s", run.id)
             await update_run_status(
                 db,
@@ -306,7 +527,7 @@ async def execute_run(run_id: str) -> None:
                 status="failed",
                 event_type="run.failed",
                 error_code="RUNTIME_ERROR",
-                error_summary="执行过程中发生未分类错误",
+                error_summary="执行过程中发生错误：" + type(exc).__name__,
             )
             await db.commit()
 

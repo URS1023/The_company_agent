@@ -167,3 +167,51 @@ def test_data_source_rejects_inline_credentials_and_accepts_secret_reference(
     assert created.status_code == 201
     assert created.json()["secret_id"] == secret.json()["id"]
     assert "password" not in created.json()["connection_config"]
+
+
+def test_capability_versions_share_and_plugin_run_are_workspace_scoped(
+    client, db_session, admin_seed
+) -> None:
+    _login(client)
+    plugin_response = client.post(
+        "/api/v1/plugins",
+        json={"name": "版本能力", "description": "demo", "spec": {"instructions": "不编造"}},
+    )
+    assert plugin_response.status_code == 201
+    plugin_id = plugin_response.json()["id"]
+    draft_id = plugin_response.json()["draft_version_id"]
+    assert client.post(f"/api/v1/plugin-versions/{draft_id}/test-runs").status_code == 200
+    assert client.post(f"/api/v1/plugin-versions/{draft_id}/publish").status_code == 200
+    versions = client.get(f"/api/v1/plugins/{plugin_id}/versions")
+    assert versions.status_code == 200
+    assert len(versions.json()) == 1
+    shared = client.post(f"/api/v1/plugins/{plugin_id}/share", json={"visibility": "workspace"})
+    assert shared.status_code == 200
+    run = client.post(f"/api/v1/plugins/{plugin_id}/runs", json={"content": "运行版本能力"})
+    assert run.status_code == 202
+    assert run.json()["plugin_version_id"] == draft_id
+    draft = client.post(
+        f"/api/v1/plugins/{plugin_id}/versions", json={"spec": {"instructions": "先验证"}}
+    )
+    assert draft.status_code == 200
+    assert draft.json()["version_number"] == 2
+
+
+def test_connector_builder_preview_never_embeds_secret(client, admin_seed) -> None:
+    _login(client)
+    response = client.post(
+        "/api/v1/connectors/preview",
+        json={
+            "name": "生成 PPT",
+            "description": "根据结构化页面生成演示文稿",
+            "provider": "http",
+            "base_url": "https://example.test",
+            "path": "/render",
+            "input_schema": {"type": "object", "required": ["title"]},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["spec"]["name"] == "ppt"
+    assert body["spec"]["secret_id"] is None
+    assert any("Secret" in warning for warning in body["warnings"])

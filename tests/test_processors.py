@@ -14,6 +14,7 @@ from backend.app.processors.renderers import (
     PresentationSpec,
     SpreadsheetSpec,
     render_docx,
+    render_pdf,
     render_pptx,
     render_xlsx,
 )
@@ -74,6 +75,8 @@ def test_renderers_produce_openable_office_files() -> None:
     xlsx_bytes = render_xlsx(SpreadsheetSpec(sheets={"Summary": [["Revenue", 100]]}))
     workbook = load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
     assert workbook["Summary"]["A1"].value == "Revenue"
+    pdf_bytes = render_pdf(DocumentSpec(title="PDF", sections=[{"paragraphs": ["Summary"]}]))
+    assert "Summary" in parse_document(pdf_bytes, "result.pdf", "application/pdf").text
 
 
 def test_images_require_vision_or_ocr() -> None:

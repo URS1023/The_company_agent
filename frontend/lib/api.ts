@@ -25,3 +25,15 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   if (!response.ok) throw new Error(`上传失败（${response.status}）`);
   return response.json() as Promise<T>;
 }
+
+export async function apiUploadMany<T>(path: string, files: File[]): Promise<T> {
+  const form = new FormData();
+  for (const file of files) form.append("uploads", file);
+  const response = await fetch(path, { method: "POST", body: form, credentials: "include" });
+  if (!response.ok) {
+    let detail = `上传失败（${response.status}）`;
+    try { detail = (await response.json()).detail ?? detail; } catch { /* keep status */ }
+    throw new Error(detail);
+  }
+  return response.json() as Promise<T>;
+}

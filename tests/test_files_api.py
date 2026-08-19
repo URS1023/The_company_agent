@@ -34,3 +34,32 @@ def test_member_can_upload_and_list_a_temporary_file(client, admin_seed, tmp_pat
         assert [item["id"] for item in listed.json()] == [body["id"]]
     finally:
         settings.local_storage_root = original_root
+
+
+def test_file_upload_supports_batch_and_rejects_unknown_formats(
+    client, admin_seed, tmp_path: Path
+) -> None:
+    original_root = settings.local_storage_root
+    settings.local_storage_root = tmp_path
+    try:
+        assert (
+            client.post(
+                "/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"}
+            ).status_code
+            == 200
+        )
+        batch = client.post(
+            "/api/v1/files/batch",
+            files=[
+                ("uploads", ("one.txt", b"one", "text/plain")),
+                ("uploads", ("two.csv", b"a,b\n1,2\n", "text/csv")),
+            ],
+        )
+        assert batch.status_code == 201
+        assert {item["name"] for item in batch.json()} == {"one.txt", "two.csv"}
+        rejected = client.post(
+            "/api/v1/files", files={"upload": ("malware.exe", b"x", "application/octet-stream")}
+        )
+        assert rejected.status_code == 415
+    finally:
+        settings.local_storage_root = original_root

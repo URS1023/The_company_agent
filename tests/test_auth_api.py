@@ -100,6 +100,9 @@ def test_admin_can_login_and_create_member(client, db_session) -> None:
         json={"status": "disabled"},
     )
     assert last_admin.status_code == 409
+    audit = client.get("/api/v1/admin/audit-logs")
+    assert audit.status_code == 200
+    assert any(row["action"] == "user.created" for row in audit.json())
 
 
 def test_unauthenticated_admin_endpoint_is_rejected(client) -> None:
@@ -108,6 +111,24 @@ def test_unauthenticated_admin_endpoint_is_rejected(client) -> None:
         json={"username": "member", "display_name": "业务成员", "role": "member"},
     )
     assert response.status_code == 401
+
+
+def test_login_lockout_after_repeated_failures(client, admin_seed, monkeypatch) -> None:
+    from backend.app.core.config import settings
+
+    monkeypatch.setattr(settings, "login_max_failures", 2)
+    first = client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "wrong-password"}
+    )
+    second = client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "wrong-password"}
+    )
+    assert first.status_code == 401
+    assert second.status_code == 401
+    locked = client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"}
+    )
+    assert locked.status_code == 401
 
 
 def test_change_password_keeps_current_session_and_invalidates_old_password(

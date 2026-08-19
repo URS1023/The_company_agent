@@ -11,6 +11,7 @@ from backend.app.processors.renderers import (
     PresentationSpec,
     SpreadsheetSpec,
     render_docx,
+    render_pdf,
     render_pptx,
     render_xlsx,
 )
@@ -81,6 +82,29 @@ async def render_presentation(
         mime_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         content=content,
         metadata={"renderer": "python-pptx", "spec": payload.spec},
+    )
+    await db.commit()
+    return ArtifactResponse.model_validate(artifact, from_attributes=True)
+
+
+@router.post("/{run_id}/render/pdf", response_model=ArtifactResponse, status_code=201)
+async def render_pdf_artifact(
+    run_id: str,
+    payload: RenderDocumentRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ArtifactResponse:
+    run, user_id = await _owned_run(run_id, request, db)
+    content = render_pdf(DocumentSpec(**payload.spec))
+    artifact = await persist_artifact(
+        db,
+        run=run,
+        owner_user_id=user_id,
+        artifact_type="pdf",
+        name=payload.name,
+        mime_type="application/pdf",
+        content=content,
+        metadata={"renderer": "pymupdf", "spec": payload.spec},
     )
     await db.commit()
     return ArtifactResponse.model_validate(artifact, from_attributes=True)

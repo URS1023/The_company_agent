@@ -43,3 +43,31 @@ def test_conversation_and_run_create_persists_event_and_outbox(
     proposal = client.post(f"/api/v1/runs/{run_id}/capability-proposals")
     assert proposal.status_code == 200
     assert proposal.json()["capability_type"] == "skill"
+
+
+def test_run_trace_cancel_retry_and_conversation_lifecycle(client, db_session, admin_seed) -> None:
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "admin-password-123"},
+    )
+    assert login.status_code == 200
+    conversation = client.post("/api/v1/conversations", json={"title": "可追踪"})
+    conversation_id = conversation.json()["id"]
+    renamed = client.patch(f"/api/v1/conversations/{conversation_id}", json={"title": "已重命名"})
+    assert renamed.status_code == 200
+    run_response = client.post(
+        f"/api/v1/runs/conversations/{conversation_id}",
+        json={"content": "检查步骤"},
+    )
+    run_id = run_response.json()["id"]
+    assert client.get(f"/api/v1/conversations/{conversation_id}/messages").status_code == 200
+    assert client.get(f"/api/v1/runs/{run_id}/steps").json() == []
+    assert client.get(f"/api/v1/runs/{run_id}/tool-calls").json() == []
+    cancelled = client.post(f"/api/v1/runs/{run_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    retried = client.post(f"/api/v1/runs/{run_id}/retry")
+    assert retried.status_code == 202
+    assert retried.json()["parent_run_id"] == run_id
+    archived = client.delete(f"/api/v1/conversations/{conversation_id}")
+    assert archived.status_code == 204

@@ -93,6 +93,25 @@ def render_xlsx(spec: SpreadsheetSpec) -> bytes:
     return buffer.getvalue()
 
 
+def render_pdf(spec: DocumentSpec) -> bytes:
+    try:
+        import fitz
+    except ImportError as exc:  # pragma: no cover
+        raise RendererError("未安装 PyMuPDF") from exc
+    document = fitz.open()
+    page = document.new_page()
+    lines = [spec.title]
+    for section in spec.sections:
+        if section.get("title"):
+            lines.append(str(section["title"]))
+        lines.extend(str(value) for value in section.get("paragraphs", []))
+        for table in section.get("tables", []):
+            lines.extend("\t".join(str(value) for value in row) for row in table)
+    text = "\n".join(lines)
+    page.insert_textbox(fitz.Rect(54, 54, 540, 760), text, fontsize=11)
+    return document.tobytes()
+
+
 __all__ = [
     "DocumentSpec",
     "PresentationSpec",
@@ -100,5 +119,6 @@ __all__ = [
     "SpreadsheetSpec",
     "render_docx",
     "render_pptx",
+    "render_pdf",
     "render_xlsx",
 ]

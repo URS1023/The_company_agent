@@ -5,10 +5,16 @@ import json
 import httpx
 import pytest
 
+from backend.app.services.parameter_compiler import compile_arguments
 from backend.app.tools.database import ReadOnlySqlError, validate_read_only_sql
-from backend.app.tools.gateway import ToolValidationError, validate_arguments
+from backend.app.tools.gateway import (
+    ToolValidationError,
+    validate_arguments,
+    validate_source_policy,
+)
 from backend.app.tools.http import HttpConnectorError, invoke, validate_target
 from backend.app.tools.mcp import StreamableHttpMcpClient
+from backend.app.tools.sandbox import SandboxError, run_trusted_sandbox
 
 
 def test_read_only_sql_accepts_select_and_rejects_side_effects() -> None:
@@ -92,3 +98,33 @@ async def test_mcp_streamable_http_json_rpc_round_trip() -> None:
     assert client.session_id == "session-1"
     assert (await client.list_tools())[0]["name"] == "echo"
     assert (await client.call_tool("echo", {"text": "ok"}))["content"][0]["text"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_native_sandbox_allows_trusted_analyzer_but_rejects_arbitrary_code() -> None:
+    result = await run_trusted_sandbox(
+        "finance.analyze", {"rows": [{"revenue": 10, "cost": 4}], "budget": 5}
+    )
+    assert result["summary"]["profit"] == 6.0
+    with pytest.raises(SandboxError, match="ARBITRARY_PYTHON_DISABLED"):
+        await run_trusted_sandbox("python.execute", {"code": "print(1)"})
+
+
+def test_parameter_compiler_fills_defaults_and_source_policy_blocks_llm_value() -> None:
+    compiled = compile_arguments(
+        {"project_id": "P-1"},
+        {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 100},
+            },
+            "required": ["project_id"],
+        },
+    )
+    assert compiled["limit"] == 100
+    with pytest.raises(ToolValidationError):
+        validate_source_policy(
+            {"amount": 100, "__sources": {"amount": "llm"}},
+            {"amount": {"source": "database", "allow_llm_generate": False}},
+        )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.database import get_db
@@ -25,8 +25,11 @@ from backend.app.models.capabilities import (
     Tool,
     ToolVersion,
 )
+from backend.app.models.runtime import Conversation, Message, Run
 from backend.app.schemas.capabilities import (
     CapabilityTestRunResponse,
+    ConnectorBuilderRequest,
+    ConnectorBuilderResponse,
     ConnectorResponse,
     ConnectorVersionResponse,
     CreateConnectorRequest,
@@ -37,15 +40,33 @@ from backend.app.schemas.capabilities import (
     DataSourceResponse,
     PluginBindingRequest,
     PluginResponse,
+    PluginRunRequest,
     PluginVersionResponse,
     SecretResponse,
+    ShareRequest,
     SkillResponse,
     SkillVersionResponse,
     ToolInvocationRequest,
+    ToolResponse,
     ToolTestResponse,
+    UpdateToolRequest,
+    VersionSpecRequest,
 )
+from backend.app.services.audit import record_audit
 from backend.app.services.auth import current_user_context
-from backend.app.services.connectors import test_database_connection, test_http_connector
+from backend.app.services.connector_builder import build_connector_spec
+from backend.app.services.connectors import (
+    invoke_database_tool,
+    test_database_connection,
+    test_http_connector,
+)
+from backend.app.services.runtime import (
+    append_outbox_event,
+    append_run_event,
+    next_message_sequence,
+)
+from backend.app.tools.http import validate_target
+from backend.app.tools.mcp import StreamableHttpMcpClient
 
 router = APIRouter(tags=["capabilities"])
 
@@ -76,6 +97,10 @@ def _plugin_version(version: PluginVersion) -> PluginVersionResponse:
 
 def _data_source(source) -> DataSourceResponse:
     return DataSourceResponse.model_validate(source, from_attributes=True)
+
+
+def _tool(tool: Tool) -> ToolResponse:
+    return ToolResponse.model_validate(tool, from_attributes=True)
 
 
 async def _can_edit(owner_id: str, user_id: str, role: str) -> bool:
@@ -186,6 +211,88 @@ async def list_skills(request: Request, db: AsyncSession = Depends(get_db)) -> l
     return [_skill(row) for row in rows]
 
 
+@router.get("/skills/{skill_id}/versions", response_model=list[SkillVersionResponse])
+async def list_skill_versions(
+    skill_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> list[SkillVersionResponse]:
+    user, _, _, membership = await current_user_context(request, db)
+    skill = await db.scalar(
+        select(Skill).where(
+            Skill.id == skill_id,
+            Skill.workspace_id == membership.workspace_id,
+            (Skill.owner_user_id == user.id)
+            | (Skill.visibility == "workspace")
+            | (membership.role == "admin"),
+        )
+    )
+    if not skill:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
+    rows = await db.scalars(
+        select(SkillVersion)
+        .where(SkillVersion.skill_id == skill.id)
+        .order_by(SkillVersion.version_number.desc())
+    )
+    return [_skill_version(row) for row in rows]
+
+
+@router.patch("/skills/{skill_id}", response_model=SkillResponse)
+async def archive_or_update_skill(
+    skill_id: str,
+    payload: CreateSkillRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SkillResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    skill = await db.scalar(
+        select(Skill).where(
+            Skill.id == skill_id,
+            Skill.workspace_id == membership.workspace_id,
+            Skill.owner_user_id == user.id,
+        )
+    )
+    if not skill:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
+    skill.name = payload.name.strip() or skill.name
+    skill.description = payload.description.strip()
+    skill.visibility = payload.visibility
+    skill.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="skill.updated",
+        resource_type="skill",
+        resource_id=skill.id,
+    )
+    await db.commit()
+    return _skill(skill)
+
+
+@router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_skill(skill_id: str, request: Request, db: AsyncSession = Depends(get_db)) -> None:
+    user, _, _, membership = await current_user_context(request, db)
+    skill = await db.scalar(
+        select(Skill).where(
+            Skill.id == skill_id,
+            Skill.workspace_id == membership.workspace_id,
+            Skill.owner_user_id == user.id,
+        )
+    )
+    if not skill:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
+    skill.status = "archived"
+    skill.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="skill.archived",
+        resource_type="skill",
+        resource_id=skill.id,
+    )
+    await db.commit()
+
+
 @router.post("/skills/{skill_id}/versions", response_model=SkillVersionResponse)
 async def create_skill_version(
     skill_id: str,
@@ -258,6 +365,25 @@ async def create_connector(
     user, _, _, membership = await current_user_context(request, db)
     if membership.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+    connector_spec = dict(payload.spec)
+    if (
+        payload.provider == "mcp"
+        and connector_spec.get("endpoint")
+        and not connector_spec.get("tools")
+    ):
+        try:
+            endpoint = validate_target(
+                str(connector_spec["endpoint"]),
+                allow_private=bool(connector_spec.get("allow_private", False)),
+            )
+            mcp_client = StreamableHttpMcpClient(endpoint)
+            await mcp_client.initialize()
+            connector_spec["tools"] = await mcp_client.list_tools()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"MCP tools discovery failed: {type(exc).__name__}",
+            ) from exc
     now = utc_now()
     connector = Connector(
         id=new_id(),
@@ -274,12 +400,12 @@ async def create_connector(
         connector_id=connector.id,
         version_number=1,
         status="draft",
-        spec=payload.spec,
+        spec=connector_spec,
         created_by=user.id,
         created_at=now,
     )
     db.add_all([connector, version])
-    for tool_spec in payload.spec.get("tools", []):
+    for tool_spec in connector_spec.get("tools", []):
         if not isinstance(tool_spec, dict) or not tool_spec.get("name"):
             continue
         tool = Tool(
@@ -314,6 +440,30 @@ async def create_connector(
         )
     await db.commit()
     return _connector(connector)
+
+
+@router.post("/connectors/preview", response_model=ConnectorBuilderResponse)
+async def preview_connector_spec(
+    payload: ConnectorBuilderRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ConnectorBuilderResponse:
+    await current_user_context(request, db)
+    spec = build_connector_spec(
+        name=payload.name,
+        description=payload.description,
+        provider=payload.provider,
+        base_url=payload.base_url,
+        path=payload.path,
+        method=payload.method,
+        input_schema=payload.input_schema,
+        output_schema=payload.output_schema,
+    )
+    warnings = []
+    if payload.provider in {"http", "mcp"} and not payload.base_url:
+        warnings.append("尚未提供 endpoint/base_url，保存前必须补齐")
+    warnings.append("Secret 只能保存为 secret_id 引用，不能写入此 Draft Spec")
+    return ConnectorBuilderResponse(spec=spec, warnings=warnings)
 
 
 @router.post(
@@ -371,7 +521,9 @@ async def list_data_sources(
     rows = await db.scalars(
         select(DataSource).where(
             DataSource.workspace_id == membership.workspace_id,
-            DataSource.owner_user_id == user.id,
+            (DataSource.owner_user_id == user.id)
+            | (DataSource.visibility == "workspace")
+            | (membership.role == "admin"),
         )
     )
     return [_data_source(row) for row in rows]
@@ -394,17 +546,84 @@ async def test_connector_invocation(
         )
     if connector.owner_user_id != user.id and membership.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无测试权限")
-    if connector.provider != "http":
+    if connector.provider not in {"http", "mcp"}:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="当前端点只测试 HTTP Connector",
+            detail="当前端点只测试 HTTP/MCP Connector",
         )
+    secret = None
+    secret_id = (version.spec or {}).get("secret_id")
+    if secret_id:
+        secret = await db.scalar(
+            select(SecretRecord).where(
+                SecretRecord.id == secret_id,
+                SecretRecord.workspace_id == membership.workspace_id,
+                SecretRecord.deleted_at.is_(None),
+            )
+        )
+        if not secret:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Connector Secret 不存在"
+            )
     try:
-        result = await test_http_connector(version, payload.arguments)
+        if connector.provider == "mcp":
+            spec = version.spec or {}
+            endpoint = validate_target(
+                str(spec.get("endpoint", "")),
+                allow_private=bool(spec.get("allow_private", False)),
+            )
+            mcp_client = StreamableHttpMcpClient(endpoint)
+            await mcp_client.initialize()
+            result = await mcp_client.call_tool(str(spec.get("name", "")), payload.arguments)
+        else:
+            result = await test_http_connector(version, payload.arguments, secret)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=type(exc).__name__,
+        ) from exc
+    return ToolTestResponse(**result)
+
+
+@router.post("/connector-versions/{version_id}/test-connection", response_model=ToolTestResponse)
+async def test_connector_connection(
+    version_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> ToolTestResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    version = await db.get(ConnectorVersion, version_id)
+    connector = await db.get(Connector, version.connector_id) if version else None
+    if not version or not connector or connector.workspace_id != membership.workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Connector Version 不存在"
+        )
+    if connector.owner_user_id != user.id and membership.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无测试权限")
+    if connector.provider != "http":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="仅 HTTP Connector 支持连接测试",
+        )
+    spec = version.spec or {}
+    # A connection test intentionally sends no user body and validates the URL,
+    # authentication reference and response shape through the same gateway.
+    secret = None
+    if spec.get("secret_id"):
+        secret = await db.scalar(
+            select(SecretRecord).where(
+                SecretRecord.id == spec["secret_id"],
+                SecretRecord.workspace_id == membership.workspace_id,
+                SecretRecord.deleted_at.is_(None),
+            )
+        )
+        if not secret:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Connector Secret 不存在"
+            )
+    try:
+        result = await test_http_connector(version, {}, secret)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=type(exc).__name__
         ) from exc
     return ToolTestResponse(**result)
 
@@ -424,7 +643,11 @@ async def test_source_connection(
     )
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DataSource 不存在")
-    if source.owner_user_id != user.id and membership.role != "admin":
+    if (
+        source.owner_user_id != user.id
+        and source.visibility != "workspace"
+        and membership.role != "admin"
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无测试权限")
     secret = await db.get(SecretRecord, source.secret_id) if source.secret_id else None
     try:
@@ -441,6 +664,40 @@ async def test_source_connection(
     return ToolTestResponse(**result)
 
 
+@router.post("/data-sources/{source_id}/tools/{operation:path}", response_model=ToolTestResponse)
+async def invoke_data_source_tool(
+    source_id: str,
+    operation: str,
+    payload: ToolInvocationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ToolTestResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    source = await db.scalar(
+        select(DataSource).where(
+            DataSource.id == source_id,
+            DataSource.workspace_id == membership.workspace_id,
+        )
+    )
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DataSource 不存在")
+    if (
+        source.owner_user_id != user.id
+        and source.visibility != "workspace"
+        and membership.role != "admin"
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无数据源使用权限")
+    secret = await db.get(SecretRecord, source.secret_id) if source.secret_id else None
+    try:
+        result = await invoke_database_tool(source, secret, operation, payload.arguments)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=type(exc).__name__,
+        ) from exc
+    return ToolTestResponse(**result)
+
+
 @router.get("/connectors", response_model=list[ConnectorResponse])
 async def list_connectors(
     request: Request, db: AsyncSession = Depends(get_db)
@@ -454,6 +711,160 @@ async def list_connectors(
         )
     )
     return [_connector(row) for row in rows]
+
+
+@router.get("/connectors/{connector_id}/tools", response_model=list[ToolResponse])
+async def list_connector_tools(
+    connector_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> list[ToolResponse]:
+    user, _, _, membership = await current_user_context(request, db)
+    connector = await db.scalar(
+        select(Connector).where(
+            Connector.id == connector_id,
+            Connector.workspace_id == membership.workspace_id,
+            (Connector.owner_user_id == user.id)
+            | (Connector.visibility == "workspace")
+            | (membership.role == "admin"),
+        )
+    )
+    if not connector:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector 不存在")
+    rows = await db.scalars(
+        select(Tool).where(Tool.connector_id == connector.id).order_by(Tool.name)
+    )
+    return [_tool(row) for row in rows]
+
+
+@router.patch("/tools/{tool_id}", response_model=ToolResponse)
+async def update_tool_status(
+    tool_id: str,
+    payload: UpdateToolRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ToolResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    tool = await db.scalar(
+        select(Tool).where(Tool.id == tool_id, Tool.workspace_id == membership.workspace_id)
+    )
+    connector = await db.get(Connector, tool.connector_id) if tool else None
+    if (
+        not tool
+        or not connector
+        or not await _can_edit(connector.owner_user_id, user.id, membership.role)
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool 不存在或无权限")
+    tool.status = payload.status
+    tool.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="tool.status_updated",
+        resource_type="tool",
+        resource_id=tool.id,
+        metadata={"status": payload.status},
+    )
+    await db.commit()
+    return _tool(tool)
+
+
+@router.get("/connectors/{connector_id}/versions", response_model=list[ConnectorVersionResponse])
+async def list_connector_versions(
+    connector_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> list[ConnectorVersionResponse]:
+    user, _, _, membership = await current_user_context(request, db)
+    connector = await db.scalar(
+        select(Connector).where(
+            Connector.id == connector_id,
+            Connector.workspace_id == membership.workspace_id,
+            (Connector.owner_user_id == user.id)
+            | (Connector.visibility == "workspace")
+            | (membership.role == "admin"),
+        )
+    )
+    if not connector:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector 不存在")
+    rows = await db.scalars(
+        select(ConnectorVersion)
+        .where(ConnectorVersion.connector_id == connector.id)
+        .order_by(ConnectorVersion.version_number.desc())
+    )
+    return [_connector_version(row) for row in rows]
+
+
+@router.post("/connectors/{connector_id}/versions", response_model=ConnectorVersionResponse)
+async def create_connector_version(
+    connector_id: str,
+    payload: VersionSpecRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ConnectorVersionResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    connector = await db.scalar(
+        select(Connector).where(
+            Connector.id == connector_id,
+            Connector.workspace_id == membership.workspace_id,
+        )
+    )
+    if not connector or not await _can_edit(connector.owner_user_id, user.id, membership.role):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Connector 不存在或无编辑权限"
+        )
+    latest = await db.scalar(
+        select(func.max(ConnectorVersion.version_number)).where(
+            ConnectorVersion.connector_id == connector.id
+        )
+    )
+    now = utc_now()
+    version = ConnectorVersion(
+        id=new_id(),
+        connector_id=connector.id,
+        version_number=int(latest or 0) + 1,
+        based_on_version_id=connector.published_version_id,
+        status="draft",
+        spec=payload.spec,
+        created_by=user.id,
+        created_at=now,
+    )
+    db.add(version)
+    connector.updated_at = now
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="connector.version_created",
+        resource_type="connector_version",
+        resource_id=version.id,
+    )
+    await db.commit()
+    return _connector_version(version)
+
+
+@router.delete("/connectors/{connector_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_connector(
+    connector_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> None:
+    user, _, _, membership = await current_user_context(request, db)
+    connector = await db.scalar(
+        select(Connector).where(
+            Connector.id == connector_id,
+            Connector.workspace_id == membership.workspace_id,
+            Connector.owner_user_id == user.id,
+        )
+    )
+    if not connector:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector 不存在")
+    connector.status = "archived"
+    connector.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="connector.archived",
+        resource_type="connector",
+        resource_id=connector.id,
+    )
+    await db.commit()
 
 
 @router.post("/connector-versions/{version_id}/publish", response_model=ConnectorVersionResponse)
@@ -535,6 +946,296 @@ async def list_plugins(
     return [_plugin(row) for row in rows]
 
 
+@router.get("/plugins/{plugin_id}/versions", response_model=list[PluginVersionResponse])
+async def list_plugin_versions(
+    plugin_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> list[PluginVersionResponse]:
+    user, _, _, membership = await current_user_context(request, db)
+    plugin = await db.scalar(
+        select(Plugin).where(
+            Plugin.id == plugin_id,
+            Plugin.workspace_id == membership.workspace_id,
+            (Plugin.owner_user_id == user.id)
+            | (Plugin.visibility == "workspace")
+            | (membership.role == "admin"),
+        )
+    )
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin 不存在")
+    rows = await db.scalars(
+        select(PluginVersion)
+        .where(PluginVersion.plugin_id == plugin.id)
+        .order_by(PluginVersion.version_number.desc())
+    )
+    return [_plugin_version(row) for row in rows]
+
+
+@router.post("/plugins/{plugin_id}/versions", response_model=PluginVersionResponse)
+async def create_plugin_version(
+    plugin_id: str,
+    payload: VersionSpecRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> PluginVersionResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    plugin = await db.scalar(
+        select(Plugin).where(
+            Plugin.id == plugin_id,
+            Plugin.workspace_id == membership.workspace_id,
+        )
+    )
+    if not plugin or not await _can_edit(plugin.owner_user_id, user.id, membership.role):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Plugin 不存在或无编辑权限"
+        )
+    latest = await db.scalar(
+        select(func.max(PluginVersion.version_number)).where(PluginVersion.plugin_id == plugin.id)
+    )
+    now = utc_now()
+    version = PluginVersion(
+        id=new_id(),
+        plugin_id=plugin.id,
+        version_number=int(latest or 0) + 1,
+        based_on_version_id=plugin.published_version_id,
+        status="draft",
+        spec=payload.spec,
+        created_by=user.id,
+        created_at=now,
+    )
+    db.add(version)
+    await db.flush()
+    if plugin.published_version_id:
+        skill_bindings = await db.scalars(
+            select(PluginSkillBinding).where(
+                PluginSkillBinding.plugin_version_id == plugin.published_version_id
+            )
+        )
+        tool_bindings = await db.scalars(
+            select(PluginToolBinding).where(
+                PluginToolBinding.plugin_version_id == plugin.published_version_id
+            )
+        )
+        resource_bindings = await db.scalars(
+            select(PluginResourceBinding).where(
+                PluginResourceBinding.plugin_version_id == plugin.published_version_id
+            )
+        )
+        for binding in skill_bindings:
+            db.add(
+                PluginSkillBinding(
+                    id=new_id(),
+                    plugin_version_id=version.id,
+                    skill_version_id=binding.skill_version_id,
+                )
+            )
+        for binding in tool_bindings:
+            db.add(
+                PluginToolBinding(
+                    id=new_id(),
+                    plugin_version_id=version.id,
+                    tool_version_id=binding.tool_version_id,
+                )
+            )
+        for binding in resource_bindings:
+            db.add(
+                PluginResourceBinding(
+                    id=new_id(),
+                    plugin_version_id=version.id,
+                    resource_type=binding.resource_type,
+                    resource_id=binding.resource_id,
+                    config=dict(binding.config or {}),
+                )
+            )
+    plugin.updated_at = now
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="plugin.version_created",
+        resource_type="plugin_version",
+        resource_id=version.id,
+    )
+    await db.commit()
+    return _plugin_version(version)
+
+
+@router.patch("/plugins/{plugin_id}", response_model=PluginResponse)
+async def update_plugin(
+    plugin_id: str,
+    payload: CreatePluginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> PluginResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    plugin = await db.scalar(
+        select(Plugin).where(
+            Plugin.id == plugin_id,
+            Plugin.workspace_id == membership.workspace_id,
+            Plugin.owner_user_id == user.id,
+        )
+    )
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin 不存在")
+    plugin.name = payload.name.strip() or plugin.name
+    plugin.description = payload.description.strip()
+    plugin.visibility = payload.visibility
+    plugin.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="plugin.updated",
+        resource_type="plugin",
+        resource_id=plugin.id,
+    )
+    await db.commit()
+    return _plugin(plugin)
+
+
+@router.delete("/plugins/{plugin_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_plugin(
+    plugin_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> None:
+    user, _, _, membership = await current_user_context(request, db)
+    plugin = await db.scalar(
+        select(Plugin).where(
+            Plugin.id == plugin_id,
+            Plugin.workspace_id == membership.workspace_id,
+            Plugin.owner_user_id == user.id,
+        )
+    )
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin 不存在")
+    plugin.status = "archived"
+    plugin.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="plugin.archived",
+        resource_type="plugin",
+        resource_id=plugin.id,
+    )
+    await db.commit()
+
+
+@router.post("/plugins/{plugin_id}/share", response_model=PluginResponse)
+async def share_plugin(
+    plugin_id: str,
+    payload: ShareRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> PluginResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    plugin = await db.scalar(
+        select(Plugin).where(
+            Plugin.id == plugin_id,
+            Plugin.workspace_id == membership.workspace_id,
+            Plugin.owner_user_id == user.id,
+        )
+    )
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin 不存在")
+    if payload.visibility == "workspace" and not plugin.published_version_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Plugin 必须先发布才能分享"
+        )
+    plugin.visibility = payload.visibility
+    plugin.updated_at = utc_now()
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="plugin.shared",
+        resource_type="plugin",
+        resource_id=plugin.id,
+        metadata={"visibility": payload.visibility},
+    )
+    await db.commit()
+    return _plugin(plugin)
+
+
+@router.post("/plugins/{plugin_id}/rollback/{version_id}", response_model=PluginVersionResponse)
+async def rollback_plugin(
+    plugin_id: str,
+    version_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> PluginVersionResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    plugin = await db.scalar(
+        select(Plugin).where(
+            Plugin.id == plugin_id,
+            Plugin.workspace_id == membership.workspace_id,
+            Plugin.owner_user_id == user.id,
+        )
+    )
+    source = await db.scalar(
+        select(PluginVersion).where(
+            PluginVersion.id == version_id,
+            PluginVersion.plugin_id == plugin_id,
+            PluginVersion.status == "published",
+        )
+    )
+    if not plugin or not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin Version 不存在")
+    latest = await db.scalar(
+        select(func.max(PluginVersion.version_number)).where(PluginVersion.plugin_id == plugin.id)
+    )
+    now = utc_now()
+    draft = PluginVersion(
+        id=new_id(),
+        plugin_id=plugin.id,
+        version_number=int(latest or 0) + 1,
+        based_on_version_id=source.id,
+        status="draft",
+        spec=dict(source.spec or {}),
+        created_by=user.id,
+        created_at=now,
+    )
+    db.add(draft)
+    await db.flush()
+    for binding in await db.scalars(
+        select(PluginSkillBinding).where(PluginSkillBinding.plugin_version_id == source.id)
+    ):
+        db.add(
+            PluginSkillBinding(
+                id=new_id(), plugin_version_id=draft.id, skill_version_id=binding.skill_version_id
+            )
+        )
+    for binding in await db.scalars(
+        select(PluginToolBinding).where(PluginToolBinding.plugin_version_id == source.id)
+    ):
+        db.add(
+            PluginToolBinding(
+                id=new_id(), plugin_version_id=draft.id, tool_version_id=binding.tool_version_id
+            )
+        )
+    for binding in await db.scalars(
+        select(PluginResourceBinding).where(PluginResourceBinding.plugin_version_id == source.id)
+    ):
+        db.add(
+            PluginResourceBinding(
+                id=new_id(),
+                plugin_version_id=draft.id,
+                resource_type=binding.resource_type,
+                resource_id=binding.resource_id,
+                config=dict(binding.config or {}),
+            )
+        )
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="plugin.rollback_draft_created",
+        resource_type="plugin_version",
+        resource_id=draft.id,
+        metadata={"based_on_version_id": source.id},
+    )
+    await db.commit()
+    return _plugin_version(draft)
+
+
 @router.post("/plugin-versions/{version_id}/publish", response_model=PluginVersionResponse)
 async def publish_plugin_version(
     version_id: str, request: Request, db: AsyncSession = Depends(get_db)
@@ -611,6 +1312,110 @@ async def clone_plugin(
     response = _plugin(clone)
     response.draft_version_id = clone_version.id
     return response
+
+
+@router.post("/plugins/{plugin_id}/runs", status_code=status.HTTP_202_ACCEPTED)
+async def run_plugin(
+    plugin_id: str,
+    payload: PluginRunRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    user, _, _, membership = await current_user_context(request, db)
+    plugin = await db.scalar(
+        select(Plugin).where(
+            Plugin.id == plugin_id,
+            Plugin.workspace_id == membership.workspace_id,
+            Plugin.status == "active",
+            (Plugin.owner_user_id == user.id)
+            | (Plugin.visibility == "workspace")
+            | (membership.role == "admin"),
+        )
+    )
+    if not plugin or not plugin.published_version_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Plugin 尚未发布")
+    conversation = None
+    if payload.conversation_id:
+        conversation = await db.scalar(
+            select(Conversation).where(
+                Conversation.id == payload.conversation_id,
+                Conversation.workspace_id == membership.workspace_id,
+                Conversation.owner_user_id == user.id,
+                Conversation.archived_at.is_(None),
+            )
+        )
+        if not conversation:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="对话不存在")
+    now = utc_now()
+    if not conversation:
+        conversation = Conversation(
+            id=new_id(),
+            workspace_id=membership.workspace_id,
+            owner_user_id=user.id,
+            title=plugin.name,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(conversation)
+        await db.flush()
+    run = Run(
+        id=new_id(),
+        workspace_id=membership.workspace_id,
+        conversation_id=conversation.id,
+        started_by_user_id=user.id,
+        plugin_version_id=plugin.published_version_id,
+        status="queued",
+        idempotency_key=payload.idempotency_key,
+        context_snapshot={
+            "runtime_schema_version": 1,
+            "plugin_version_id": plugin.published_version_id,
+        },
+        model_profile="reasoning",
+        created_at=now,
+    )
+    db.add(run)
+    db.add(
+        Message(
+            id=new_id(),
+            workspace_id=membership.workspace_id,
+            conversation_id=conversation.id,
+            role="user",
+            sequence=await next_message_sequence(db, conversation.id),
+            content=payload.content,
+            parts_json=[{"type": "text", "text": payload.content}],
+            status="completed",
+            created_at=now,
+        )
+    )
+    conversation.updated_at = now
+    await db.flush()
+    await append_run_event(
+        db,
+        workspace_id=membership.workspace_id,
+        run_id=run.id,
+        event_type="run.created",
+        payload={"status": "queued", "plugin_version_id": plugin.published_version_id},
+    )
+    await append_outbox_event(
+        db,
+        topic="run.created",
+        payload={"run_id": run.id, "workspace_id": membership.workspace_id},
+    )
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="plugin.run_created",
+        resource_type="plugin",
+        resource_id=plugin.id,
+        run_id=run.id,
+    )
+    await db.commit()
+    return {
+        "run_id": run.id,
+        "conversation_id": conversation.id,
+        "plugin_version_id": plugin.published_version_id,
+    }
 
 
 async def _create_capability_test(
@@ -707,14 +1512,41 @@ async def test_plugin_version(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin Version 不存在")
     if plugin.owner_user_id != user.id and membership.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无 Test Run 权限")
-    result = await _create_capability_test(
-        db=db,
+    skill_bindings = list(
+        await db.scalars(
+            select(PluginSkillBinding).where(PluginSkillBinding.plugin_version_id == version.id)
+        )
+    )
+    tool_bindings = list(
+        await db.scalars(
+            select(PluginToolBinding).where(PluginToolBinding.plugin_version_id == version.id)
+        )
+    )
+    skill_versions = [
+        await db.get(SkillVersion, binding.skill_version_id) for binding in skill_bindings
+    ]
+    tool_versions = [
+        await db.get(ToolVersion, binding.tool_version_id) for binding in tool_bindings
+    ]
+    invalid_refs = [
+        "skill" for item in skill_versions if not item or item.status != "published"
+    ] + ["tool" for item in tool_versions if not item or item.status != "published"]
+    now = utc_now()
+    passed = isinstance(version.spec, dict) and not invalid_refs
+    result = CapabilityTestRun(
+        id=new_id(),
         workspace_id=membership.workspace_id,
-        user_id=user.id,
         resource_type="plugin",
         resource_version_id=version.id,
-        spec=version.spec,
+        status="passed" if passed else "failed",
+        input_json=version.spec if isinstance(version.spec, dict) else {},
+        output_json={"validated": passed, "invalid_refs": invalid_refs},
+        error_summary=None if passed else "Plugin 引用的 Skill/Tool 必须先发布",
+        created_by=user.id,
+        created_at=now,
     )
+    db.add(result)
+    await db.commit()
     return _test_response(result)
 
 
@@ -734,6 +1566,15 @@ async def bind_plugin_version(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有 Draft 可以修改绑定")
     if plugin.owner_user_id != user.id and membership.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无绑定权限")
+    await db.execute(
+        delete(PluginSkillBinding).where(PluginSkillBinding.plugin_version_id == version.id)
+    )
+    await db.execute(
+        delete(PluginToolBinding).where(PluginToolBinding.plugin_version_id == version.id)
+    )
+    await db.execute(
+        delete(PluginResourceBinding).where(PluginResourceBinding.plugin_version_id == version.id)
+    )
     skills = list(
         await db.scalars(
             select(SkillVersion)

@@ -14,6 +14,28 @@ class CapabilityProposal:
 def propose_from_user_intent(content: str) -> CapabilityProposal:
     text = content.strip()
     lowered = text.casefold()
+    wants_method = "以后" in text or "方法" in text or "按这个方式" in text
+    wants_connector = any(word in lowered for word in ["api", "接口", "程序", "mcp"])
+    wants_plugin = any(word in text for word in ["组合", "插件", "能力包"])
+    if wants_connector and not wants_plugin:
+        return CapabilityProposal(
+            capability_type="connector",
+            name="企业接口连接器",
+            reason="任务描述包含企业 API/程序接入，先生成 Connector Draft 并要求测试后发布。",
+            spec={"provider": "http", "tools": [], "status": "draft"},
+        )
+    if wants_method and not wants_plugin:
+        return CapabilityProposal(
+            capability_type="skill",
+            name="可复用工作方法",
+            reason="用户明确要求以后复用处理方法，应保存为新的 Skill Draft。",
+            spec={
+                "instructions": text,
+                "rules": [],
+                "required_resources": [],
+                "recommended_tools": [],
+            },
+        )
     if any(word in text for word in ["招标", "投标"]):
         return CapabilityProposal(
             capability_type="plugin",

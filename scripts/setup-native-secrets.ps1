@@ -56,6 +56,8 @@ $lines = @(
     "ALLOW_EXTERNAL_CHAT=true",
     "ALLOW_EXTERNAL_VISION=true",
     "ALLOW_EXTERNAL_EMBEDDING=true",
+    "ALLOW_TRUSTED_SANDBOX=true",
+    "ALLOW_ARBITRARY_PYTHON=false",
     "WEB_ORIGINS=http://127.0.0.1:3000,http://localhost:3000"
 )
 

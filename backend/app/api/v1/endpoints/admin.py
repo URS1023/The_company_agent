@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.ids import new_id
 from backend.app.core.security import hash_password, utc_now
@@ -18,12 +19,16 @@ from backend.app.models.identity import (
     Workspace,
     WorkspaceMember,
 )
+from backend.app.models.runtime import AuditLog
+from backend.app.providers.compatible import agnes_client, siliconflow_client
 from backend.app.schemas.auth import (
+    AuditLogResponse,
     CreatedUserResponse,
     CreateUserRequest,
     UpdateUserRequest,
     UserResponse,
 )
+from backend.app.services.audit import record_audit
 from backend.app.services.auth import _public_user, new_temporary_password, require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -106,6 +111,15 @@ async def create_user(
             ),
         ]
     )
+    await record_audit(
+        db,
+        workspace_id=workspace.id,
+        actor_user_id=admin_user.id,
+        action="user.created",
+        resource_type="user",
+        resource_id=user.id,
+        metadata={"role": payload.role},
+    )
     await db.commit()
     return CreatedUserResponse(
         user=_public_user(user, identity, credential),
@@ -127,7 +141,7 @@ async def update_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    _, _, _, membership = await require_admin(request, db)
+    admin_user, _, _, membership = await require_admin(request, db)
     target_membership = await db.scalar(
         select(WorkspaceMember).where(
             WorkspaceMember.workspace_id == membership.workspace_id,
@@ -169,6 +183,15 @@ async def update_user(
     await db.execute(
         Session.__table__.update().where(Session.user_id == user_id).values(revoked_at=utc_now())
     )
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=admin_user.id,
+        action="user.updated",
+        resource_type="user",
+        resource_id=user_id,
+        metadata={"status": payload.status, "role": payload.role},
+    )
     await db.commit()
     return _public_user(user, identity, credential)
 
@@ -179,7 +202,7 @@ async def reset_password(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> CreatedUserResponse:
-    _, _, _, membership = await require_admin(request, db)
+    admin_user, _, _, membership = await require_admin(request, db)
     target_membership = await db.scalar(
         select(WorkspaceMember).where(
             WorkspaceMember.workspace_id == membership.workspace_id,
@@ -203,6 +226,14 @@ async def reset_password(
     await db.execute(
         Session.__table__.update().where(Session.user_id == user_id).values(revoked_at=utc_now())
     )
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=admin_user.id,
+        action="user.password_reset",
+        resource_type="user",
+        resource_id=user_id,
+    )
     await db.commit()
     return CreatedUserResponse(
         user=_public_user(user, identity, credential),
@@ -217,7 +248,7 @@ async def revoke_sessions(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    _, _, _, membership = await require_admin(request, db)
+    admin_user, _, _, membership = await require_admin(request, db)
     target = await db.scalar(
         select(WorkspaceMember).where(
             WorkspaceMember.workspace_id == membership.workspace_id,
@@ -229,7 +260,114 @@ async def revoke_sessions(
     await db.execute(
         Session.__table__.update().where(Session.user_id == user_id).values(revoked_at=utc_now())
     )
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=admin_user.id,
+        action="user.sessions_revoked",
+        resource_type="user",
+        resource_id=user_id,
+    )
     await db.commit()
+
+
+@router.get("/audit-logs", response_model=list[AuditLogResponse])
+async def list_audit_logs(
+    request: Request, db: AsyncSession = Depends(get_db)
+) -> list[AuditLogResponse]:
+    _, _, _, membership = await require_admin(request, db)
+    rows = await db.scalars(
+        select(AuditLog)
+        .where(AuditLog.workspace_id == membership.workspace_id)
+        .order_by(AuditLog.created_at.desc())
+        .limit(200)
+    )
+    return [AuditLogResponse.model_validate(row, from_attributes=True) for row in rows]
+
+
+@router.get("/model-profiles")
+async def list_model_profiles(request: Request, db: AsyncSession = Depends(get_db)) -> list[dict]:
+    _, _, _, _ = await require_admin(request, db)
+    return [
+        {
+            "profile": "reasoning",
+            "provider": "agnes",
+            "model": settings.agnes_model,
+            "configured": bool(settings.agnes_api_key),
+            "enabled": settings.allow_external_chat,
+        },
+        {
+            "profile": "vision",
+            "provider": "siliconflow",
+            "model": settings.siliconflow_vision_model,
+            "configured": bool(settings.siliconflow_api_key),
+            "enabled": settings.allow_external_vision,
+        },
+        {
+            "profile": "embedding",
+            "provider": "siliconflow",
+            "model": settings.siliconflow_embedding_model,
+            "dimensions": settings.siliconflow_embedding_dimensions,
+            "configured": bool(settings.siliconflow_api_key),
+            "enabled": settings.allow_external_embedding,
+        },
+    ]
+
+
+@router.post("/model-profiles/{profile}/probe")
+async def probe_model_profile(
+    profile: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict[str, object]:
+    user, _, _, membership = await require_admin(request, db)
+    try:
+        if profile == "reasoning":
+            response = await agnes_client().chat(
+                model=settings.agnes_model,
+                messages=[{"role": "user", "content": "只回复 OK"}],
+            )
+            detail = {"text": response.text[:100], "model": settings.agnes_model}
+        elif profile == "vision":
+            response = await siliconflow_client().chat(
+                model=settings.siliconflow_vision_model,
+                messages=[{"role": "user", "content": "只回复 OK"}],
+                enable_thinking=False,
+            )
+            detail = {"text": response.text[:100], "model": settings.siliconflow_vision_model}
+        elif profile == "embedding":
+            vectors = await siliconflow_client().embeddings(
+                model=settings.siliconflow_embedding_model, inputs=["probe"]
+            )
+            detail = {
+                "dimensions": len(vectors[0]) if vectors else 0,
+                "model": settings.siliconflow_embedding_model,
+            }
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未知 Model Profile")
+    except Exception as exc:
+        await record_audit(
+            db,
+            workspace_id=membership.workspace_id,
+            actor_user_id=user.id,
+            action="model_profile.probe_failed",
+            resource_type="model_profile",
+            resource_id=profile,
+            metadata={"error": type(exc).__name__},
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=type(exc).__name__
+        ) from exc
+    await record_audit(
+        db,
+        workspace_id=membership.workspace_id,
+        actor_user_id=user.id,
+        action="model_profile.probed",
+        resource_type="model_profile",
+        resource_id=profile,
+        metadata=detail,
+    )
+    await db.commit()
+    return {"profile": profile, "status": "ready", **detail}
 
 
 __all__ = ["router"]

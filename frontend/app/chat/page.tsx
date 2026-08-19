@@ -1,11 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { apiJson } from "@/lib/api";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { apiJson, apiUploadMany } from "@/lib/api";
 
 type Message = { role: "user" | "assistant"; content: string };
-type RunEvent = { event?: string; payload?: { text?: string }; error?: string };
+type RunEvent = { event?: string; payload?: { text?: string; error_summary?: string; error_code?: string }; error?: string };
 type Plugin = { id: string; name: string; published_version_id: string | null };
+type KnowledgeBase = { id: string; name: string; status: string };
+type SelectedFile = { id: string; name: string; size: number };
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
@@ -16,10 +18,30 @@ export default function ChatPage() {
   const [navOpen, setNavOpen] = useState(false);
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [selectedPluginId, setSelectedPluginId] = useState("");
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void apiJson<Plugin[]>("/api/v1/plugins").then(setPlugins).catch(() => setPlugins([]));
+    void apiJson<KnowledgeBase[]>("/api/v1/knowledge-bases").then(setKnowledgeBases).catch(() => setKnowledgeBases([]));
   }, []);
+
+  async function chooseFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    if (!files.length) return;
+    try {
+      setError("");
+      const uploaded = await apiUploadMany<SelectedFile[]>("/api/v1/files/batch", files);
+      setSelectedFiles((current) => [...current, ...uploaded]);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "文件上传失败");
+    } finally {
+      event.target.value = "";
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,10 +69,16 @@ export default function ChatPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: value, plugin_version_id: selectedPluginId || undefined })
+        body: JSON.stringify({
+          content: value,
+          plugin_version_id: selectedPluginId || undefined,
+          file_ids: selectedFiles.map((file) => file.id),
+          knowledge_base_ids: selectedKnowledgeBaseId ? [selectedKnowledgeBaseId] : []
+        })
       });
       if (!runResponse.ok) throw new Error("Run 创建失败，请检查登录状态和服务状态");
       const run = await runResponse.json();
+      setLastRunId(run.id);
       const source = new EventSource(`/api/v1/runs/${run.id}/events`);
       let assistantStarted = false;
       const appendAssistant = (text: string) => {
@@ -71,7 +99,7 @@ export default function ChatPage() {
         if (data.event === "message.delta") appendAssistant(data.payload?.text ?? "");
         if (data.event === "run.failed") {
           source.close();
-          setError(data.error ?? "Run 执行失败");
+          setError(data.payload?.error_summary ?? data.error ?? "Run 执行失败");
           setRunning(false);
         }
         if (data.event === "run.completed") {
@@ -104,6 +132,7 @@ export default function ChatPage() {
           <a href="/plugins" onClick={() => setNavOpen(false)}>插件</a>
           <a href="/files" onClick={() => setNavOpen(false)}>文件</a>
           <a href="/data-sources" onClick={() => setNavOpen(false)}>数据源</a>
+          <a href="/demos" onClick={() => setNavOpen(false)}>业务示例</a>
         </nav>
         <div className="sidebar-spacer" />
         <div className="workspace-chip"><span className="status-dot" /> 默认工作区</div>
@@ -112,7 +141,7 @@ export default function ChatPage() {
       <main className="chat-main">
         <header className="chat-header">
           <div className="chat-header-left"><button className="mobile-nav-button" type="button" aria-label="打开导航" onClick={() => setNavOpen(true)}>☰</button><div><span className="chat-title">新对话</span><span className="chat-context"> · 默认工作区</span></div></div>
-          <button className="details-button" type="button">执行详情</button>
+          {lastRunId ? <a className="details-button" href={`/runs/${lastRunId}`}>执行详情</a> : <button className="details-button" type="button">执行详情</button>}
         </header>
         <section className="message-column" aria-live="polite">
           {messages.length === 0 ? (
@@ -136,7 +165,13 @@ export default function ChatPage() {
           {error ? <p className="form-error inline-error" role="alert">{error}</p> : null}
         </section>
         <form className="composer-wrap" onSubmit={submit}>
-          <div className="context-chips"><button type="button">＋ 添加文件</button><button type="button">选择知识库</button><label className="plugin-select">使用插件<select aria-label="选择插件" value={selectedPluginId} onChange={(event) => setSelectedPluginId(event.target.value)}><option value="">不使用插件</option>{plugins.filter((plugin) => plugin.published_version_id).map((plugin) => <option value={plugin.published_version_id ?? ""} key={plugin.id}>{plugin.name}</option>)}</select></label></div>
+          <div className="context-chips">
+            <button type="button" onClick={() => fileInputRef.current?.click()}>＋ 添加文件</button>
+            <input ref={fileInputRef} type="file" multiple hidden onChange={chooseFiles} />
+            <label className="plugin-select">选择知识库<select aria-label="选择知识库" value={selectedKnowledgeBaseId} onChange={(event) => setSelectedKnowledgeBaseId(event.target.value)}><option value="">不使用知识库</option>{knowledgeBases.filter((base) => base.status === "active").map((base) => <option value={base.id} key={base.id}>{base.name}</option>)}</select></label>
+            <label className="plugin-select">使用插件<select aria-label="选择插件" value={selectedPluginId} onChange={(event) => setSelectedPluginId(event.target.value)}><option value="">不使用插件</option>{plugins.filter((plugin) => plugin.published_version_id).map((plugin) => <option value={plugin.published_version_id ?? ""} key={plugin.id}>{plugin.name}</option>)}</select></label>
+            {selectedFiles.map((file) => <button className="context-chip" type="button" key={file.id} onClick={() => setSelectedFiles((current) => current.filter((item) => item.id !== file.id))}>{file.name} ×</button>)}
+          </div>
           <div className="composer">
             <textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入消息…" rows={1} aria-label="消息输入" />
             <button className="send-button" type="submit" disabled={!input.trim() || running} aria-label={running ? "正在处理" : "发送消息"}>{running ? "…" : "↑"}</button>

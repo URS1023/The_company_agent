@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -45,10 +47,23 @@ class CreatedUserResponse(BaseModel):
     temporary_password: str
 
 
+class AuditLogResponse(BaseModel):
+    id: str
+    actor_user_id: str | None
+    action: str
+    resource_type: str
+    resource_id: str | None
+    run_id: str | None
+    ip_address: str | None
+    metadata_json: dict
+    created_at: datetime
+
+
 __all__ = [
     "ChangePasswordRequest",
     "CreateUserRequest",
     "CreatedUserResponse",
+    "AuditLogResponse",
     "LoginRequest",
     "LoginResponse",
     "UserResponse",

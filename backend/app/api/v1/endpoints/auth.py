@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,11 +36,24 @@ async def login(
     if not context:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码不正确")
     user, identity, credential = context
+    now = utc_now()
+    if (
+        credential.locked_until
+        and credential.locked_until > now
+        or credential.must_change_password
+        and credential.temporary_password_expires_at
+        and credential.temporary_password_expires_at <= now
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码不正确")
     if user.status != "active" or not verify_password(credential.password_hash, payload.password):
         credential.failed_attempt_count += 1
+        if credential.failed_attempt_count >= settings.login_max_failures:
+            credential.locked_until = now + timedelta(seconds=settings.login_lockout_seconds)
+            credential.failed_attempt_count = 0
         await db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码不正确")
     credential.failed_attempt_count = 0
+    credential.locked_until = None
     membership = await workspace_for_user(db, user.id)
     if not membership:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号尚未加入 Workspace")
@@ -79,6 +94,7 @@ async def me(request: Request, db: AsyncSession = Depends(get_db)) -> UserRespon
 async def change_password(
     payload: ChangePasswordRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     user, identity, credential, _ = await current_user_context(request, db)
@@ -94,8 +110,10 @@ async def change_password(
             select(Session).where(Session.token_digest == digest_token(token))
         )
         if session:
-            session.credential_version = credential.credential_version
+            session.revoked_at = utc_now()
+    new_token = await create_session(db, user, credential)
     await db.commit()
+    set_session_cookie(response, new_token)
     return _public_user(user, identity, credential)
 
 

@@ -13,8 +13,15 @@ class McpError(RuntimeError):
 class StreamableHttpMcpClient:
     """Minimal MCP JSON-RPC client for Streamable HTTP; stdio is a separate secure runner."""
 
-    def __init__(self, endpoint: str, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        headers: dict[str, str] | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.endpoint = endpoint
+        self.headers = headers or {}
         self.transport = transport
         self._next_id = 0
         self.session_id: str | None = None
@@ -28,6 +35,7 @@ class StreamableHttpMcpClient:
             "Accept": "application/json, text/event-stream",
             "Content-Type": "application/json",
         }
+        headers.update(self.headers)
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         async with httpx.AsyncClient(timeout=60, transport=self.transport) as client:

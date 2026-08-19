@@ -60,6 +60,9 @@ def test_artifact_preview_and_download_require_workspace_ownership(
         assert download.status_code == 200
         assert download.content == b"artifact result"
         assert "attachment" in download.headers["content-disposition"]
+        input_ref = client.post(f"/api/v1/artifacts/{artifact_id}/use-as-input")
+        assert input_ref.status_code == 200
+        assert input_ref.json()["artifact_id"] == artifact_id
     finally:
         settings.local_storage_root = original_root
 
@@ -98,11 +101,17 @@ def test_render_endpoints_create_typed_artifacts(client, admin_seed, tmp_path):
             f"/api/v1/runs/{run['id']}/render/spreadsheet",
             json={"name": "经营数据.xlsx", "spec": {"sheets": {"Summary": [["Revenue", 100]]}}},
         )
+        pdf = client.post(
+            f"/api/v1/runs/{run['id']}/render/pdf",
+            json={"name": "投标文件.pdf", "spec": {"title": "投标文件", "sections": []}},
+        )
         assert document.status_code == 201
         assert presentation.status_code == 201
         assert spreadsheet.status_code == 201
+        assert pdf.status_code == 201
         assert document.json()["type"] == "document"
         assert presentation.json()["type"] == "presentation"
         assert spreadsheet.json()["type"] == "spreadsheet"
+        assert pdf.json()["type"] == "pdf"
     finally:
         settings.local_storage_root = original_root

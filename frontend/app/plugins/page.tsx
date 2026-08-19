@@ -54,6 +54,16 @@ export default function PluginsPage() {
     }
   }
 
+  async function clone(plugin: Plugin) {
+    try { await apiJson(`/api/v1/plugins/${plugin.id}/clone`, { method: "POST" }); await load(); }
+    catch (cloneError) { setError(cloneError instanceof Error ? cloneError.message : "复制插件失败"); }
+  }
+
+  async function share(plugin: Plugin) {
+    try { await apiJson(`/api/v1/plugins/${plugin.id}/share`, { method: "POST", body: JSON.stringify({ visibility: plugin.visibility === "workspace" ? "private" : "workspace" }) }); await load(); }
+    catch (shareError) { setError(shareError instanceof Error ? shareError.message : "分享插件失败"); }
+  }
+
   return (
     <main className="management-shell">
       <header className="management-header">
@@ -71,6 +81,7 @@ export default function PluginsPage() {
           <h2>{plugin.name}</h2>
           <p>{plugin.description || "暂无说明"}</p>
           <p className="muted">{plugin.published_version_id ? "可在 Chat 中使用" : "等待测试"}</p>
+          <div className="row-actions"><button type="button" onClick={() => void clone(plugin)}>复制</button>{plugin.published_version_id ? <button type="button" onClick={() => void share(plugin)}>{plugin.visibility === "workspace" ? "取消分享" : "分享给 Workspace"}</button> : null}<a href={`/chat?plugin=${plugin.published_version_id ?? ""}`}>运行</a></div>
         </article>)}
       </section>
     </main>

@@ -66,6 +66,11 @@ class OpenAICompatibleClient:
         data = response.json()
         message = data.get("choices", [{}])[0].get("message", {})
         content = message.get("content") or ""
+        if isinstance(content, list):
+            content = "".join(
+                str(part.get("text", "")) if isinstance(part, dict) else str(part)
+                for part in content
+            )
         return ChatResponse(text=content, raw=data, tool_calls=message.get("tool_calls", []))
 
     async def stream_chat(

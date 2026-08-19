@@ -22,4 +22,13 @@ class ArtifactPreviewResponse(BaseModel):
     preview_available: bool
 
 
-__all__ = ["ArtifactPreviewResponse", "ArtifactResponse"]
+class ArtifactInputResponse(BaseModel):
+    artifact_id: str
+    resource_type: str = "artifact"
+    name: str
+    mime_type: str
+    size: int
+    sha256: str | None = None
+
+
+__all__ = ["ArtifactInputResponse", "ArtifactPreviewResponse", "ArtifactResponse"]

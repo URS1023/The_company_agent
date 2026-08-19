@@ -30,12 +30,26 @@ from backend.app.models.identity import (
     WorkspaceMember,
 )
 from backend.app.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
-from backend.app.models.runtime import Conversation, Message, OutboxEvent, Run, RunEvent
+from backend.app.models.runtime import (
+    AuditLog,
+    Citation,
+    Conversation,
+    Message,
+    ModelCall,
+    OutboxEvent,
+    Run,
+    RunEvent,
+    RunResourceSnapshot,
+    RunStep,
+    ToolCall,
+)
 
 __all__ = [
     "AuthIdentity",
+    "AuditLog",
     "Artifact",
     "CapabilityTestRun",
+    "Citation",
     "Conversation",
     "Connector",
     "ConnectorVersion",
@@ -47,6 +61,7 @@ __all__ = [
     "KnowledgeDocument",
     "LocalCredential",
     "Message",
+    "ModelCall",
     "Organization",
     "OrganizationMember",
     "OutboxEvent",
@@ -57,12 +72,15 @@ __all__ = [
     "PluginVersion",
     "Run",
     "RunEvent",
+    "RunResourceSnapshot",
+    "RunStep",
     "SecretRecord",
     "Session",
     "Skill",
     "SkillVersion",
     "Tool",
     "ToolVersion",
+    "ToolCall",
     "User",
     "Workspace",
     "WorkspaceMember",

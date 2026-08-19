@@ -143,6 +143,7 @@ class DataSource(Base):
     owner_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    visibility: Mapped[str] = mapped_column(String(32), nullable=False, default="workspace")
     connection_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     secret_id: Mapped[str | None] = mapped_column(ForeignKey("secrets.id"))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")

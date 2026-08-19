@@ -40,10 +40,11 @@ test.describe("public and navigation surfaces", () => {
       ["/knowledge", "知识库"],
       ["/plugins", "插件"],
       ["/files", "文件"],
-      ["/data-sources", "数据源"]
+      ["/data-sources", "数据源"],
+      ["/demos", "业务示例"]
     ] as const) {
       await page.goto(path);
-      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
     }
   });
 
@@ -51,6 +52,14 @@ test.describe("public and navigation surfaces", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/chat");
     await expect(page.getByRole("textbox", { name: "消息输入" })).toBeVisible();
+    const bodyWidth = await page.locator("body").evaluate((node) => node.scrollWidth);
+    const viewportWidth = await page.evaluate(() => window.innerWidth);
+    expect(bodyWidth).toBeLessThanOrEqual(viewportWidth + 1);
+  });
+
+  test("narrow 320px layout has no page-level horizontal overflow", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.goto("/chat");
     const bodyWidth = await page.locator("body").evaluate((node) => node.scrollWidth);
     const viewportWidth = await page.evaluate(() => window.innerWidth);
     expect(bodyWidth).toBeLessThanOrEqual(viewportWidth + 1);

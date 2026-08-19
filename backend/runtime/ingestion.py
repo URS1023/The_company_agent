@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import socket
@@ -38,8 +39,39 @@ async def ingest_document(document_id: str) -> None:
             return
         try:
             raw = LocalFileStorage().get_bytes(file_asset.storage_key)
-            parsed = parse_document(raw, file_asset.name, file_asset.mime_type)
-            chunks = chunk_text(parsed.text)
+            if (file_asset.mime_type or "").startswith("image/"):
+                if not settings.allow_external_vision or not settings.siliconflow_api_key:
+                    raise ValueError("图片需要启用 Vision Profile 或本地 OCR")
+                if len(raw) > 10 * 1024 * 1024:
+                    raise ValueError("图片超过 Vision 10 MB 保护上限")
+                response = await siliconflow_client().chat(
+                    model=settings.siliconflow_vision_model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "请提取图片中的可读文字和关键表格信息，不能臆测。",
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": (
+                                            f"data:{file_asset.mime_type};base64,"
+                                            f"{base64.b64encode(raw).decode()}"
+                                        )
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                    enable_thinking=False,
+                )
+                parsed_text = response.text or ""
+            else:
+                parsed_text = parse_document(raw, file_asset.name, file_asset.mime_type).text
+            chunks = chunk_text(parsed_text)
             if not chunks:
                 document.status = "failed"
                 document.error_summary = "文件没有可索引文本"
@@ -89,6 +121,9 @@ async def embed_document(document_id: str) -> None:
         )
         if not chunks:
             return
+        file_asset = await db.get(FileAsset, document.file_id)
+        if not file_asset:
+            return
         vectors = await siliconflow_client().embeddings(
             model=settings.siliconflow_embedding_model,
             inputs=[chunk.text for chunk in chunks],
@@ -105,6 +140,8 @@ async def embed_document(document_id: str) -> None:
                     "knowledge_base_id": chunk.knowledge_base_id,
                     "document_version_id": chunk.document_id,
                     "chunk_id": chunk.id,
+                    "file_id": file_asset.id,
+                    "file_name": file_asset.name,
                     "content": chunk.text,
                     "location": chunk.location,
                     "embedding": vector,

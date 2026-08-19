@@ -19,3 +19,9 @@ def test_config_summary_does_not_expose_provider_secrets() -> None:
     assert body["embedding_model"] == "BAAI/bge-m3"
     assert "api_key" not in body
     assert "secret" not in body
+
+
+def test_model_profiles_are_not_exposed_to_unauthenticated_users() -> None:
+    client = TestClient(app)
+    response = client.get("/api/v1/admin/model-profiles")
+    assert response.status_code == 401

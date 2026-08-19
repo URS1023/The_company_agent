@@ -6,6 +6,7 @@ from backend.app.api.v1.endpoints import (
     auth,
     capabilities,
     chat,
+    demos,
     files,
     health,
     knowledge,
@@ -20,6 +21,7 @@ router.include_router(system.router)
 router.include_router(auth.router)
 router.include_router(admin.router)
 router.include_router(chat.router)
+router.include_router(demos.router)
 router.include_router(runs.router)
 router.include_router(files.router)
 router.include_router(knowledge.router)

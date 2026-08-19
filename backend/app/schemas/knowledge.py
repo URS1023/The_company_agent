@@ -11,6 +11,12 @@ class CreateKnowledgeBaseRequest(BaseModel):
     visibility: str = Field(default="private", pattern="^(private|workspace)$")
 
 
+class UpdateKnowledgeBaseRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    visibility: str | None = Field(default=None, pattern="^(private|workspace)$")
+
+
 class KnowledgeBaseResponse(BaseModel):
     id: str
     name: str
@@ -45,6 +51,8 @@ class KnowledgeSearchHit(BaseModel):
     text: str
     score: float | None = None
     location: dict = Field(default_factory=dict)
+    file_id: str | None = None
+    file_name: str | None = None
 
 
 class KnowledgeSearchResponse(BaseModel):
@@ -56,6 +64,7 @@ __all__ = [
     "AddKnowledgeDocumentRequest",
     "CreateKnowledgeBaseRequest",
     "KnowledgeBaseResponse",
+    "UpdateKnowledgeBaseRequest",
     "KnowledgeDocumentResponse",
     "KnowledgeSearchHit",
     "KnowledgeSearchRequest",

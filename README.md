@@ -14,7 +14,7 @@
 - 开发期向量检索：本机 Elasticsearch
 - 开发期任务流：MySQL Outbox + Redis Streams
 
-完整安全 Sandbox、隔离 stdio MCP 和 Office 预览属于后续发布闸门；当前不会开放任意用户代码执行。
+native-dev 只开放仓库内经过测试的确定性分析器；完整安全 Sandbox、隔离 stdio MCP 和 LibreOffice 预览属于后续发布闸门，当前不会开放任意用户代码执行。
 
 ## Native 开发启动
 
@@ -33,6 +33,15 @@
 .venv/Scripts/pytest.exe
 .venv/Scripts/alembic.exe heads
 ```
+
+浏览器回归（会启动临时 SQLite API，不会触碰本地 MySQL）：
+
+```powershell
+cd frontend
+& E:/Environment_f/nvm_f/v22.13.0/npm.cmd run test:e2e
+```
+
+也可以直接访问 `/demos` 验证招投标缺口检测和财务经营分析两个示例；真实 Chat Run 通过 `/runs/:runId` 查看步骤、Tool 调用和错误诊断。
 
 启动 API：
 

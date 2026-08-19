@@ -54,6 +54,22 @@ class CreateConnectorRequest(BaseModel):
     spec: dict = Field(default_factory=dict)
 
 
+class ConnectorBuilderRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=5000)
+    provider: str = Field(default="http", pattern="^(http|mcp|database|builtin|sandbox)$")
+    base_url: str = ""
+    path: str = ""
+    method: str = Field(default="POST", pattern="^(GET|POST|PUT|PATCH|DELETE)$")
+    input_schema: dict = Field(default_factory=dict)
+    output_schema: dict = Field(default_factory=dict)
+
+
+class ConnectorBuilderResponse(BaseModel):
+    spec: dict
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ConnectorResponse(BaseModel):
     id: str
     name: str
@@ -107,12 +123,14 @@ class CreateDataSourceRequest(BaseModel):
     provider: str = Field(pattern="^(mysql|postgresql)$")
     connection_config: dict[str, str] = Field(default_factory=dict)
     secret_id: str | None = None
+    visibility: str = Field(default="workspace", pattern="^(private|workspace)$")
 
 
 class DataSourceResponse(BaseModel):
     id: str
     name: str
     provider: str
+    visibility: str
     connection_config: dict[str, str]
     secret_id: str | None
     status: str
@@ -128,6 +146,19 @@ class ToolTestResponse(BaseModel):
     status: str
     data: dict | list | str | None = None
     metadata: dict = Field(default_factory=dict)
+
+
+class ToolResponse(BaseModel):
+    id: str
+    connector_id: str
+    name: str
+    description: str
+    status: str
+    published_version_id: str | None
+
+
+class UpdateToolRequest(BaseModel):
+    status: str = Field(pattern="^(active|disabled)$")
 
 
 class VersionSpecRequest(BaseModel):
@@ -150,6 +181,16 @@ class PluginBindingRequest(BaseModel):
     resources: list[dict[str, str]] = Field(default_factory=list)
 
 
+class ShareRequest(BaseModel):
+    visibility: str = Field(pattern="^(private|workspace)$")
+
+
+class PluginRunRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=100_000)
+    conversation_id: str | None = None
+    idempotency_key: str | None = Field(default=None, max_length=200)
+
+
 class CapabilityProposalResponse(BaseModel):
     capability_type: str
     name: str
@@ -161,6 +202,8 @@ __all__ = [
     "ConnectorResponse",
     "ConnectorVersionResponse",
     "CreateConnectorRequest",
+    "ConnectorBuilderRequest",
+    "ConnectorBuilderResponse",
     "CreateDataSourceRequest",
     "CreatePluginRequest",
     "CreateSecretRequest",
@@ -172,9 +215,13 @@ __all__ = [
     "SkillResponse",
     "SkillVersionResponse",
     "ToolInvocationRequest",
+    "ToolResponse",
     "ToolTestResponse",
+    "UpdateToolRequest",
     "VersionSpecRequest",
     "CapabilityTestRunResponse",
     "PluginBindingRequest",
+    "PluginRunRequest",
+    "ShareRequest",
     "CapabilityProposalResponse",
 ]

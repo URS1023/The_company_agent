@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.database import get_db
 from backend.app.core.storage import LocalFileStorage, StorageError
 from backend.app.models.capabilities import Artifact
-from backend.app.schemas.artifacts import ArtifactPreviewResponse, ArtifactResponse
+from backend.app.processors.documents import DocumentProcessingError, parse_document
+from backend.app.schemas.artifacts import (
+    ArtifactInputResponse,
+    ArtifactPreviewResponse,
+    ArtifactResponse,
+)
 from backend.app.services.auth import current_user_context
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
@@ -67,15 +72,15 @@ async def preview_artifact(
     artifact = await _authorized_artifact(artifact_id, request, db)
     text: str | None = None
     preview_available = False
-    if artifact.storage_key and artifact.mime_type.startswith(("text/", "application/json")):
+    if artifact.storage_key:
         try:
-            text = (
-                LocalFileStorage()
-                .get_bytes(artifact.storage_key)
-                .decode("utf-8", errors="replace")[:50_000]
-            )
+            raw = LocalFileStorage().get_bytes(artifact.storage_key)
+            if artifact.mime_type.startswith(("text/", "application/json")):
+                text = raw.decode("utf-8", errors="replace")[:50_000]
+            else:
+                text = parse_document(raw, artifact.name, artifact.mime_type).text[:50_000]
             preview_available = True
-        except StorageError:
+        except (StorageError, DocumentProcessingError):
             preview_available = False
     return ArtifactPreviewResponse(
         artifact=_response(artifact), text=text, preview_available=preview_available
@@ -102,6 +107,26 @@ async def download_artifact(
         or mimetypes.guess_type(artifact.name)[0]
         or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{disposition_name}"'},
+    )
+
+
+@router.post("/{artifact_id}/use-as-input", response_model=ArtifactInputResponse)
+async def use_artifact_as_input(
+    artifact_id: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> ArtifactInputResponse:
+    """Return a typed resource reference for the next Run.
+
+    Artifacts stay immutable and are not silently copied into Knowledge.  The
+    client includes the returned `artifact_id` in a subsequent Run context.
+    """
+
+    artifact = await _authorized_artifact(artifact_id, request, db)
+    return ArtifactInputResponse(
+        artifact_id=artifact.id,
+        name=artifact.name,
+        mime_type=artifact.mime_type,
+        size=artifact.size,
+        sha256=artifact.sha256,
     )
 
 
