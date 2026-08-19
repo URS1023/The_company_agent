@@ -10,6 +10,7 @@ from backend.app.models.capabilities import (
     PluginVersion,
     SecretRecord,
     SkillVersion,
+    ToolVersion,
 )
 
 
@@ -104,7 +105,11 @@ def test_connector_publish_requires_admin_and_keeps_spec(client, db_session, adm
         json={
             "name": "测试 API",
             "provider": "http",
-            "spec": {"method": "GET", "base_url": "http://127.0.0.1"},
+            "spec": {
+                "method": "GET",
+                "base_url": "http://127.0.0.1",
+                "tools": [{"name": "health", "description": "Health probe"}],
+            },
         },
     )
     assert response.status_code == 201
@@ -116,6 +121,15 @@ def test_connector_publish_requires_admin_and_keeps_spec(client, db_session, adm
         )
 
     version = asyncio.get_event_loop().run_until_complete(read_connector_version())
+
+    async def read_tool_version():
+        return await db_session.scalar(
+            select(ToolVersion).where(ToolVersion.connector_version_id == version.id)
+        )
+
+    tool_version = asyncio.get_event_loop().run_until_complete(read_tool_version())
+    assert tool_version is not None
+    assert tool_version.spec["name"] == "health"
     assert client.post(f"/api/v1/connector-versions/{version.id}/test-runs").status_code == 200
     published = client.post(f"/api/v1/connector-versions/{version.id}/publish")
     assert published.status_code == 200
