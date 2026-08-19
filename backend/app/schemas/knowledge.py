@@ -35,9 +35,29 @@ class KnowledgeDocumentResponse(BaseModel):
     updated_at: datetime
 
 
+class KnowledgeSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=10_000)
+    top_k: int = Field(default=8, ge=1, le=50)
+
+
+class KnowledgeSearchHit(BaseModel):
+    chunk_id: str
+    text: str
+    score: float | None = None
+    location: dict = Field(default_factory=dict)
+
+
+class KnowledgeSearchResponse(BaseModel):
+    query: str
+    hits: list[KnowledgeSearchHit]
+
+
 __all__ = [
     "AddKnowledgeDocumentRequest",
     "CreateKnowledgeBaseRequest",
     "KnowledgeBaseResponse",
     "KnowledgeDocumentResponse",
+    "KnowledgeSearchHit",
+    "KnowledgeSearchRequest",
+    "KnowledgeSearchResponse",
 ]

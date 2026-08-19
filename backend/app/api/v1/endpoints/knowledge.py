@@ -4,16 +4,22 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.ids import new_id
 from backend.app.core.security import utc_now
 from backend.app.models.files import FileAsset
 from backend.app.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
+from backend.app.providers.compatible import siliconflow_client
+from backend.app.providers.elastic_vector import ElasticsearchVectorStore
 from backend.app.schemas.knowledge import (
     AddKnowledgeDocumentRequest,
     CreateKnowledgeBaseRequest,
     KnowledgeBaseResponse,
     KnowledgeDocumentResponse,
+    KnowledgeSearchHit,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
 )
 from backend.app.services.auth import current_user_context
 from backend.app.services.runtime import append_outbox_event
@@ -173,6 +179,54 @@ async def list_documents(
         )
         for document, chunk_count in rows.all()
     ]
+
+
+@router.post("/{knowledge_base_id}/search", response_model=KnowledgeSearchResponse)
+async def search_knowledge(
+    knowledge_base_id: str,
+    payload: KnowledgeSearchRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeSearchResponse:
+    user, _, _, membership = await current_user_context(request, db)
+    base = await db.scalar(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.workspace_id == membership.workspace_id,
+            (KnowledgeBase.owner_user_id == user.id) | (KnowledgeBase.visibility == "workspace"),
+        )
+    )
+    if not base:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
+    if not settings.allow_external_embedding or not settings.siliconflow_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="当前 Workspace 未配置外部 Embedding Provider",
+        )
+    vectors = await siliconflow_client().embeddings(
+        model=settings.siliconflow_embedding_model,
+        inputs=[payload.query],
+    )
+    if not vectors or len(vectors[0]) != settings.siliconflow_embedding_dimensions:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Embedding 维度不匹配")
+    hits = await ElasticsearchVectorStore().search(
+        workspace_id=membership.workspace_id,
+        knowledge_base_id=base.id,
+        query_vector=vectors[0],
+        k=payload.top_k,
+    )
+    return KnowledgeSearchResponse(
+        query=payload.query,
+        hits=[
+            KnowledgeSearchHit(
+                chunk_id=str(hit.get("chunk_id", "")),
+                text=str(hit.get("content", "")),
+                score=hit.get("score"),
+                location=hit.get("location") or {},
+            )
+            for hit in hits
+        ],
+    )
 
 
 __all__ = ["router"]

@@ -53,3 +53,28 @@ def test_knowledge_base_keeps_uploaded_file_as_explicit_document(
         assert outbox[-1].payload["file_id"] == file_id
     finally:
         settings.local_storage_root = original_root
+
+
+def test_knowledge_search_fails_closed_when_external_embedding_is_disabled(
+    client, admin_seed
+) -> None:
+    from backend.app.core.config import settings
+
+    original = settings.allow_external_embedding
+    settings.allow_external_embedding = False
+    try:
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={"username": "admin", "password": "admin-password-123"},
+            ).status_code
+            == 200
+        )
+        base = client.post("/api/v1/knowledge-bases", json={"name": "搜索测试"}).json()
+        response = client.post(
+            f"/api/v1/knowledge-bases/{base['id']}/search",
+            json={"query": "项目资质"},
+        )
+        assert response.status_code == 503
+    finally:
+        settings.allow_external_embedding = original
