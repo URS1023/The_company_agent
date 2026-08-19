@@ -1103,6 +1103,50 @@ async def create_connector_version(
         created_at=now,
     )
     db.add(version)
+    for tool_spec in payload.spec.get("tools", []):
+        if not isinstance(tool_spec, dict) or not tool_spec.get("name"):
+            continue
+        tool = await db.scalar(
+            select(Tool).where(
+                Tool.connector_id == connector.id,
+                Tool.name == str(tool_spec["name"]),
+            )
+        )
+        if not tool:
+            tool = Tool(
+                id=new_id(),
+                workspace_id=membership.workspace_id,
+                connector_id=connector.id,
+                name=str(tool_spec["name"]),
+                description=str(tool_spec.get("description", "")),
+                status="active",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(tool)
+            await db.flush()
+        latest_tool = await db.scalar(
+            select(func.max(ToolVersion.version_number)).where(ToolVersion.tool_id == tool.id)
+        )
+        tool_version = ToolVersion(
+            id=new_id(),
+            tool_id=tool.id,
+            connector_version_id=version.id,
+            version_number=int(latest_tool or 0) + 1,
+            status="draft",
+            spec=dict(tool_spec),
+            created_by=user.id,
+            created_at=now,
+        )
+        db.add(tool_version)
+        await db.flush()
+        db.add(
+            ConnectorToolBinding(
+                id=new_id(),
+                connector_version_id=version.id,
+                tool_version_id=tool_version.id,
+            )
+        )
     connector.updated_at = now
     await record_audit(
         db,

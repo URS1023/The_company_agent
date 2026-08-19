@@ -161,6 +161,12 @@ def test_connector_publish_requires_admin_and_keeps_spec(client, db_session, adm
     published = client.post(f"/api/v1/connector-versions/{version.id}/publish")
     assert published.status_code == 200
     assert published.json()["spec"]["method"] == "GET"
+    next_version = client.post(
+        f"/api/v1/connectors/{connector_id}/versions",
+        json={"spec": {"method": "GET", "tools": [{"name": "health_v2", "description": "v2"}]}},
+    )
+    assert next_version.status_code == 200
+    assert len(client.get(f"/api/v1/connectors/{connector_id}/tools").json()) == 2
 
 
 def test_data_source_rejects_inline_credentials_and_accepts_secret_reference(
