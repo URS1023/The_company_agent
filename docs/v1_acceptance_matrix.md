@@ -41,3 +41,9 @@
 ./scripts/setup-native-secrets.ps1
 ./scripts/verify-native.ps1 -AdminUsername workspace-admin
 ```
+
+启动原生 API/Worker 后的认证冒烟入口：
+
+```powershell
+./scripts/run-native-smoke.ps1 -Username workspace-admin
+```

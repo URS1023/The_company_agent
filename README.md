@@ -79,6 +79,14 @@ cd frontend
 ./scripts/verify-native.ps1 -AdminUsername workspace-admin
 ```
 
+启动 API 和原生 Worker 后，可以运行认证冒烟测试：
+
+```powershell
+./scripts/run-native-smoke.ps1 -Username workspace-admin
+```
+
+脚本只输出 HTTP 状态和 Run 状态，不输出模型回答、文件内容、密码或 API Key。
+
 启动前端：
 
 ```powershell
