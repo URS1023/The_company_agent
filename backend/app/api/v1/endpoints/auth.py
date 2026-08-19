@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.config import settings
 from backend.app.core.database import get_db
-from backend.app.core.security import hash_password, utc_now, verify_password
+from backend.app.core.security import digest_token, hash_password, utc_now, verify_password
 from backend.app.models.identity import Session
 from backend.app.schemas.auth import (
     ChangePasswordRequest,
@@ -87,6 +88,13 @@ async def change_password(
     credential.must_change_password = False
     credential.password_changed_at = utc_now()
     credential.credential_version += 1
+    token = request.cookies.get(settings.session_cookie_name)
+    if token:
+        session = await db.scalar(
+            select(Session).where(Session.token_digest == digest_token(token))
+        )
+        if session:
+            session.credential_version = credential.credential_version
     await db.commit()
     return _public_user(user, identity, credential)
 

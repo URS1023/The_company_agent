@@ -19,6 +19,12 @@ class CreateUserRequest(BaseModel):
     role: str = Field(default="member", pattern="^(admin|member)$")
 
 
+class UpdateUserRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=200)
+    role: str | None = Field(default=None, pattern="^(admin|member)$")
+    status: str | None = Field(default=None, pattern="^(active|disabled)$")
+
+
 class UserResponse(BaseModel):
     id: str
     username: str
@@ -46,4 +52,5 @@ __all__ = [
     "LoginRequest",
     "LoginResponse",
     "UserResponse",
+    "UpdateUserRequest",
 ]

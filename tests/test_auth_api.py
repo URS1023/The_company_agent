@@ -83,6 +83,24 @@ def test_admin_can_login_and_create_member(client, db_session) -> None:
     assert created.json()["user"]["must_change_password"] is True
     assert len(created.json()["temporary_password"]) >= 12
 
+    members = client.get("/api/v1/admin/users")
+    assert members.status_code == 200
+    member = next(item for item in members.json() if item["username"] == "member")
+    reset = client.post(f"/api/v1/admin/users/{member['id']}/reset-password")
+    assert reset.status_code == 200
+    assert reset.json()["user"]["must_change_password"] is True
+    assert reset.json()["temporary_password"] != created.json()["temporary_password"]
+    disabled = client.patch(
+        f"/api/v1/admin/users/{member['id']}",
+        json={"status": "disabled"},
+    )
+    assert disabled.status_code == 200
+    last_admin = client.patch(
+        f"/api/v1/admin/users/{admin.id}",
+        json={"status": "disabled"},
+    )
+    assert last_admin.status_code == 409
+
 
 def test_unauthenticated_admin_endpoint_is_rejected(client) -> None:
     response = client.post(
@@ -90,3 +108,29 @@ def test_unauthenticated_admin_endpoint_is_rejected(client) -> None:
         json={"username": "member", "display_name": "业务成员", "role": "member"},
     )
     assert response.status_code == 401
+
+
+def test_change_password_keeps_current_session_and_invalidates_old_password(
+    client, admin_seed
+) -> None:
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin-password-123"},
+        ).status_code
+        == 200
+    )
+    changed = client.post(
+        "/api/v1/auth/change-password",
+        json={
+            "current_password": "admin-password-123",
+            "new_password": "admin-password-456",
+        },
+    )
+    assert changed.status_code == 200
+    assert client.get("/api/v1/auth/me").status_code == 200
+    old_login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "admin-password-123"},
+    )
+    assert old_login.status_code == 401
