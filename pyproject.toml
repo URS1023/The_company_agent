@@ -48,6 +48,7 @@ dev = [
 company-agent-api = "backend.app.main:run"
 company-agent-probe = "backend.scripts.provider_probe:main"
 company-agent-bootstrap = "backend.scripts.bootstrap_admin:main"
+company-agent-worker = "backend.runtime.worker:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["backend"]
