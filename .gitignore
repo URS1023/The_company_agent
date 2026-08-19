@@ -36,6 +36,7 @@ runtime-data/
 *.log
 *.pid
 *.lock
+.e2e.db
 
 # IDE / OS
 .idea/

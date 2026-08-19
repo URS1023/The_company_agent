@@ -15,11 +15,20 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "mobile-chromium", use: { ...devices["Pixel 5"] } }
   ],
-  webServer: {
-    command: "E:/Environment_f/nvm_f/v22.13.0/npm.cmd run dev",
-    url: "http://127.0.0.1:3000",
-    reuseExistingServer: true,
-    timeout: 120_000,
-    cwd: "."
-  }
+  webServer: [
+    {
+      command: "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/run-e2e-api.ps1",
+      url: "http://127.0.0.1:8000/api/v1/health/live",
+      reuseExistingServer: false,
+      timeout: 120_000,
+      cwd: "."
+    },
+    {
+      command: "E:/Environment_f/nvm_f/v22.13.0/npm.cmd run dev",
+      url: "http://127.0.0.1:3000",
+      reuseExistingServer: true,
+      timeout: 120_000,
+      cwd: "."
+    }
+  ]
 });
