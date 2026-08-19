@@ -73,7 +73,7 @@ cd frontend
 .venv/Scripts/company-agent-bootstrap.exe --username workspace-admin
 ```
 
-也可以用一次性验证脚本完成迁移、管理员初始化和三个 Provider 的真实 Probe（管理员密码仍以交互方式读取）：
+也可以用一次性验证脚本确保配置的 MySQL 数据库存在、执行迁移、初始化管理员和完成三个 Provider 的真实 Probe（管理员密码仍以交互方式读取）：
 
 ```powershell
 ./scripts/verify-native.ps1 -AdminUsername workspace-admin
