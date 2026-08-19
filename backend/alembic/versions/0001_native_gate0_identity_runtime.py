@@ -293,6 +293,51 @@ def upgrade() -> None:
         sa.UniqueConstraint("connector_id", "version_number"),
     )
     op.create_table(
+        "tools",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("connector_id", sa.String(26), sa.ForeignKey("connectors.id"), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
+        sa.Column("description", sa.Text, nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("published_version_id", sa.String(26)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_tools_workspace_id_name", "workspace_id", "name"),
+    )
+    op.create_table(
+        "tool_versions",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("tool_id", sa.String(26), sa.ForeignKey("tools.id"), nullable=False),
+        sa.Column(
+            "connector_version_id",
+            sa.String(26),
+            sa.ForeignKey("connector_versions.id"),
+            nullable=False,
+        ),
+        sa.Column("version_number", sa.Integer, nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("spec", sa.JSON, nullable=False),
+        sa.Column("created_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("published_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("tool_id", "version_number"),
+    )
+    op.create_table(
+        "connector_tool_bindings",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column(
+            "connector_version_id",
+            sa.String(26),
+            sa.ForeignKey("connector_versions.id"),
+            nullable=False,
+        ),
+        sa.Column(
+            "tool_version_id", sa.String(26), sa.ForeignKey("tool_versions.id"), nullable=False
+        ),
+        sa.UniqueConstraint("connector_version_id", "tool_version_id"),
+    )
+    op.create_table(
         "data_sources",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
@@ -351,12 +396,9 @@ def upgrade() -> None:
             "plugin_version_id", sa.String(26), sa.ForeignKey("plugin_versions.id"), nullable=False
         ),
         sa.Column(
-            "connector_version_id",
-            sa.String(26),
-            sa.ForeignKey("connector_versions.id"),
-            nullable=False,
+            "tool_version_id", sa.String(26), sa.ForeignKey("tool_versions.id"), nullable=False
         ),
-        sa.UniqueConstraint("plugin_version_id", "connector_version_id"),
+        sa.UniqueConstraint("plugin_version_id", "tool_version_id"),
     )
     op.create_table(
         "plugin_version_resource_bindings",
@@ -413,6 +455,9 @@ def downgrade() -> None:
         "plugin_versions",
         "plugins",
         "data_sources",
+        "connector_tool_bindings",
+        "tool_versions",
+        "tools",
         "connector_versions",
         "connectors",
         "skill_versions",

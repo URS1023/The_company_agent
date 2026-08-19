@@ -11,6 +11,7 @@ from backend.app.core.security import utc_now
 from backend.app.models.capabilities import (
     CapabilityTestRun,
     Connector,
+    ConnectorToolBinding,
     ConnectorVersion,
     DataSource,
     Plugin,
@@ -21,6 +22,8 @@ from backend.app.models.capabilities import (
     SecretRecord,
     Skill,
     SkillVersion,
+    Tool,
+    ToolVersion,
 )
 from backend.app.schemas.capabilities import (
     CapabilityTestRunResponse,
@@ -276,6 +279,39 @@ async def create_connector(
         created_at=now,
     )
     db.add_all([connector, version])
+    for tool_spec in payload.spec.get("tools", []):
+        if not isinstance(tool_spec, dict) or not tool_spec.get("name"):
+            continue
+        tool = Tool(
+            id=new_id(),
+            workspace_id=membership.workspace_id,
+            connector_id=connector.id,
+            name=str(tool_spec["name"]),
+            description=str(tool_spec.get("description", "")),
+            created_at=now,
+            updated_at=now,
+        )
+        tool_version = ToolVersion(
+            id=new_id(),
+            tool_id=tool.id,
+            connector_version_id=version.id,
+            version_number=1,
+            status="draft",
+            spec=tool_spec,
+            created_by=user.id,
+            created_at=now,
+        )
+        db.add_all(
+            [
+                tool,
+                tool_version,
+                ConnectorToolBinding(
+                    id=new_id(),
+                    connector_version_id=version.id,
+                    tool_version_id=tool_version.id,
+                ),
+            ]
+        )
     await db.commit()
     return _connector(connector)
 
@@ -704,18 +740,18 @@ async def bind_plugin_version(
             )
         )
     )
-    connectors = list(
+    tools = list(
         await db.scalars(
-            select(ConnectorVersion)
-            .join(Connector)
+            select(ToolVersion)
+            .join(Tool)
             .where(
-                ConnectorVersion.id.in_(payload.connector_version_ids),
-                Connector.workspace_id == membership.workspace_id,
+                ToolVersion.id.in_(payload.tool_version_ids),
+                Tool.workspace_id == membership.workspace_id,
             )
         )
     )
-    if len(skills) != len(set(payload.skill_version_ids)) or len(connectors) != len(
-        set(payload.connector_version_ids)
+    if len(skills) != len(set(payload.skill_version_ids)) or len(tools) != len(
+        set(payload.tool_version_ids)
     ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -727,12 +763,12 @@ async def bind_plugin_version(
                 id=new_id(), plugin_version_id=version.id, skill_version_id=skill_version.id
             )
         )
-    for connector_version in connectors:
+    for tool_version in tools:
         db.add(
             PluginToolBinding(
                 id=new_id(),
                 plugin_version_id=version.id,
-                connector_version_id=connector_version.id,
+                tool_version_id=tool_version.id,
             )
         )
     for resource in payload.resources:

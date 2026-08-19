@@ -89,6 +89,49 @@ class ConnectorVersion(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Tool(Base):
+    __tablename__ = "tools"
+    __table_args__ = (Index("ix_tools_workspace_id_name", "workspace_id", "name"),)
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    connector_id: Mapped[str] = mapped_column(ForeignKey("connectors.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    published_version_id: Mapped[str | None] = mapped_column(String(26))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ToolVersion(Base):
+    __tablename__ = "tool_versions"
+    __table_args__ = (UniqueConstraint("tool_id", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_id)
+    tool_id: Mapped[str] = mapped_column(ForeignKey("tools.id"), nullable=False)
+    connector_version_id: Mapped[str] = mapped_column(
+        ForeignKey("connector_versions.id"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    spec: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ConnectorToolBinding(Base):
+    __tablename__ = "connector_tool_bindings"
+    __table_args__ = (UniqueConstraint("connector_version_id", "tool_version_id"),)
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_id)
+    connector_version_id: Mapped[str] = mapped_column(
+        ForeignKey("connector_versions.id"), nullable=False
+    )
+    tool_version_id: Mapped[str] = mapped_column(ForeignKey("tool_versions.id"), nullable=False)
+
+
 class DataSource(Base):
     __tablename__ = "data_sources"
     __table_args__ = (
@@ -149,13 +192,11 @@ class PluginSkillBinding(Base):
 
 class PluginToolBinding(Base):
     __tablename__ = "plugin_version_tool_bindings"
-    __table_args__ = (UniqueConstraint("plugin_version_id", "connector_version_id"),)
+    __table_args__ = (UniqueConstraint("plugin_version_id", "tool_version_id"),)
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_id)
     plugin_version_id: Mapped[str] = mapped_column(ForeignKey("plugin_versions.id"), nullable=False)
-    connector_version_id: Mapped[str] = mapped_column(
-        ForeignKey("connector_versions.id"), nullable=False
-    )
+    tool_version_id: Mapped[str] = mapped_column(ForeignKey("tool_versions.id"), nullable=False)
 
 
 class PluginResourceBinding(Base):

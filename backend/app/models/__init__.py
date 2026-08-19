@@ -4,6 +4,7 @@ from backend.app.models.capabilities import (
     Artifact,
     CapabilityTestRun,
     Connector,
+    ConnectorToolBinding,
     ConnectorVersion,
     DataSource,
     Plugin,
@@ -14,6 +15,8 @@ from backend.app.models.capabilities import (
     SecretRecord,
     Skill,
     SkillVersion,
+    Tool,
+    ToolVersion,
 )
 from backend.app.models.files import FileAsset
 from backend.app.models.identity import (
@@ -36,6 +39,7 @@ __all__ = [
     "Conversation",
     "Connector",
     "ConnectorVersion",
+    "ConnectorToolBinding",
     "DataSource",
     "FileAsset",
     "KnowledgeBase",
@@ -57,6 +61,8 @@ __all__ = [
     "Session",
     "Skill",
     "SkillVersion",
+    "Tool",
+    "ToolVersion",
     "User",
     "Workspace",
     "WorkspaceMember",

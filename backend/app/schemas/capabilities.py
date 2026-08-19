@@ -145,7 +145,7 @@ class CapabilityTestRunResponse(BaseModel):
 
 class PluginBindingRequest(BaseModel):
     skill_version_ids: list[str] = Field(default_factory=list)
-    connector_version_ids: list[str] = Field(default_factory=list)
+    tool_version_ids: list[str] = Field(default_factory=list)
     resources: list[dict[str, str]] = Field(default_factory=list)
 
 
