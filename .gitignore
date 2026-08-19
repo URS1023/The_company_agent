@@ -1,0 +1,53 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+.secrets/
+secrets/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local runtime data
+storage/
+data/
+runtime-data/
+*.log
+*.pid
+*.lock
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Test artifacts and generated reports
+playwright-report/
+test-results/
+screenshots/
+videos/
+reports/
