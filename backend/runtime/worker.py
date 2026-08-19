@@ -276,8 +276,13 @@ async def ensure_group(client: Any) -> None:
             raise
 
 
-async def execute_run(run_id: str) -> None:
-    async with SessionLocal() as db:
+async def execute_run(
+    run_id: str,
+    *,
+    session_factory=SessionLocal,
+    model_gateway_factory=ModelGateway,
+) -> None:
+    async with session_factory() as db:
         run = await db.get(Run, run_id)
         if not run or run.status not in {"queued", "created"}:
             return
@@ -311,7 +316,7 @@ async def execute_run(run_id: str) -> None:
             await db.commit()
             return
         try:
-            client = ModelGateway()
+            client = model_gateway_factory()
             tool_definitions, tool_versions = await load_tool_context(db, run)
             messages, citations = await resolve_context(
                 db, run=run, user_message=user_message.content
