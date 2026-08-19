@@ -35,7 +35,7 @@
 ```text
 Python 3.12 compile      passed
 Ruff                     passed
-Pytest                   62 passed
+Pytest                   64 passed
 Ruff                     passed
 Alembic SQL generation   passed (`0002_runtime_trace`)
 Next ESLint              passed

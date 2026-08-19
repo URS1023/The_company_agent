@@ -859,7 +859,17 @@ async def test_connector_invocation(
             )
             mcp_client = StreamableHttpMcpClient(endpoint)
             await mcp_client.initialize()
-            result = await mcp_client.call_tool(str(spec.get("name", "")), payload.arguments)
+            tool_name = payload.tool_name or spec.get("name")
+            if not tool_name:
+                tool_name = ((spec.get("tools") or [{}])[0]).get("name")
+            if not tool_name:
+                raise ValueError("MCP Connector 没有可调用 Tool")
+            raw_result = await mcp_client.call_tool(str(tool_name), payload.arguments)
+            result = {
+                "status": "success",
+                "data": raw_result,
+                "metadata": {"provider": "mcp"},
+            }
         else:
             result = await test_http_connector(version, payload.arguments, secret)
     except Exception as exc:

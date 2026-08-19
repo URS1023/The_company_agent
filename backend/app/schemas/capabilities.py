@@ -165,6 +165,7 @@ class DataSourceResponse(BaseModel):
 
 
 class ToolInvocationRequest(BaseModel):
+    tool_name: str | None = None
     arguments: dict = Field(default_factory=dict)
 
 

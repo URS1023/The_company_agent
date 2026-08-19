@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sqlalchemy import select
 
@@ -266,6 +269,64 @@ def test_connector_builder_preview_never_embeds_secret(client, admin_seed) -> No
     assert any("Secret" in warning for warning in body["warnings"])
 
 
+def test_http_connector_connection_and_invocation_use_tool_gateway(
+    client, db_session, admin_seed
+) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            body = json.dumps({"status": "ok"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        _login(client)
+        response = client.post(
+            "/api/v1/connectors",
+            json={
+                "name": "本地健康 API",
+                "provider": "http",
+                "spec": {
+                    "method": "GET",
+                    "base_url": f"http://127.0.0.1:{server.server_port}",
+                    "path": "/health",
+                    "allow_private": True,
+                    "input_schema": {"type": "object"},
+                    "tools": [{"name": "health", "description": "health"}],
+                },
+            },
+        )
+        assert response.status_code == 201
+        connector_id = response.json()["id"]
+
+        async def read_version():
+            return await db_session.scalar(
+                select(ConnectorVersion).where(ConnectorVersion.connector_id == connector_id)
+            )
+
+        version = asyncio.get_event_loop().run_until_complete(read_version())
+        assert version is not None
+        connection = client.post(f"/api/v1/connector-versions/{version.id}/test-connection")
+        invocation = client.post(
+            f"/api/v1/connector-versions/{version.id}/test-invocation",
+            json={"arguments": {}},
+        )
+        assert connection.status_code == 200
+        assert invocation.status_code == 200
+        assert invocation.json()["data"] == {"status": "ok"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_capability_specs_reject_inline_credentials(client, admin_seed) -> None:
     _login(client)
     rejected = client.post(
@@ -323,3 +384,61 @@ def test_skill_version_routes_and_tool_toggle_are_exercisable(
     toggled = client.patch(f"/api/v1/tools/{tool.id}", json={"status": "disabled"})
     assert toggled.status_code == 200
     assert toggled.json()["status"] == "disabled"
+
+
+def test_mcp_connector_discovers_and_invokes_streamable_http_tools(client, admin_seed) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            request = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+            method = request["method"]
+            if method == "initialize":
+                result = {"protocolVersion": "2025-06-18"}
+            elif method == "tools/list":
+                result = {"tools": [{"name": "echo", "description": "echo"}]}
+            else:
+                result = {"content": [{"type": "text", "text": "ok"}]}
+            body = json.dumps(
+                {"jsonrpc": "2.0", "id": request.get("id"), "result": result}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        _login(client)
+        response = client.post(
+            "/api/v1/connectors",
+            json={
+                "name": "本地 MCP",
+                "provider": "mcp",
+                "spec": {
+                    "endpoint": f"http://127.0.0.1:{server.server_port}/mcp",
+                    "allow_private": True,
+                },
+            },
+        )
+        assert response.status_code == 201
+        connector_id = response.json()["id"]
+        tools = client.get(f"/api/v1/connectors/{connector_id}/tools")
+        assert tools.status_code == 200
+        assert tools.json()[0]["name"] == "echo"
+        versions = client.get(f"/api/v1/connectors/{connector_id}/versions")
+        assert versions.status_code == 200
+        version_id = versions.json()[0]["id"]
+        invocation = client.post(
+            f"/api/v1/connector-versions/{version_id}/test-invocation",
+            json={"tool_name": "echo", "arguments": {"text": "hi"}},
+        )
+        assert invocation.status_code == 200
+        assert invocation.json()["data"]["content"][0]["text"] == "ok"
+    finally:
+        server.shutdown()
+        server.server_close()
