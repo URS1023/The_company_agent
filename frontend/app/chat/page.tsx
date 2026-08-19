@@ -1,9 +1,11 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { apiJson } from "@/lib/api";
 
 type Message = { role: "user" | "assistant"; content: string };
 type RunEvent = { event?: string; payload?: { text?: string }; error?: string };
+type Plugin = { id: string; name: string; published_version_id: string | null };
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
@@ -12,6 +14,12 @@ export default function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [navOpen, setNavOpen] = useState(false);
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
+  const [selectedPluginId, setSelectedPluginId] = useState("");
+
+  useEffect(() => {
+    void apiJson<Plugin[]>("/api/v1/plugins").then(setPlugins).catch(() => setPlugins([]));
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,7 +47,7 @@ export default function ChatPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: value })
+        body: JSON.stringify({ content: value, plugin_version_id: selectedPluginId || undefined })
       });
       if (!runResponse.ok) throw new Error("Run 创建失败，请检查登录状态和服务状态");
       const run = await runResponse.json();
@@ -128,7 +136,7 @@ export default function ChatPage() {
           {error ? <p className="form-error inline-error" role="alert">{error}</p> : null}
         </section>
         <form className="composer-wrap" onSubmit={submit}>
-          <div className="context-chips"><button type="button">＋ 添加文件</button><button type="button">选择知识库</button><button type="button">使用插件</button></div>
+          <div className="context-chips"><button type="button">＋ 添加文件</button><button type="button">选择知识库</button><label className="plugin-select">使用插件<select aria-label="选择插件" value={selectedPluginId} onChange={(event) => setSelectedPluginId(event.target.value)}><option value="">不使用插件</option>{plugins.filter((plugin) => plugin.published_version_id).map((plugin) => <option value={plugin.published_version_id ?? ""} key={plugin.id}>{plugin.name}</option>)}</select></label></div>
           <div className="composer">
             <textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入消息…" rows={1} aria-label="消息输入" />
             <button className="send-button" type="submit" disabled={!input.trim() || running} aria-label={running ? "正在处理" : "发送消息"}>{running ? "…" : "↑"}</button>
