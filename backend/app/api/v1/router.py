@@ -2,7 +2,9 @@ from fastapi import APIRouter
 
 from backend.app.api.v1.endpoints import (
     admin,
+    artifacts,
     auth,
+    capabilities,
     chat,
     files,
     health,
@@ -20,5 +22,7 @@ router.include_router(chat.router)
 router.include_router(runs.router)
 router.include_router(files.router)
 router.include_router(knowledge.router)
+router.include_router(capabilities.router)
+router.include_router(artifacts.router)
 
 __all__ = ["router"]

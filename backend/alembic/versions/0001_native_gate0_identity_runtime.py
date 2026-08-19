@@ -222,10 +222,187 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Index("ix_knowledge_chunks_document_id_ordinal", "document_id", "ordinal"),
     )
+    op.create_table(
+        "secrets",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("owner_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
+        sa.Column("provider", sa.String(64), nullable=False),
+        sa.Column("ciphertext", sa.Text, nullable=False),
+        sa.Column("nonce", sa.String(64), nullable=False),
+        sa.Column("key_version", sa.Integer, nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("deleted_at", sa.DateTime(timezone=True)),
+        sa.Index("ix_secrets_workspace_id_created_at", "workspace_id", "created_at"),
+    )
+    op.create_table(
+        "skills",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("owner_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
+        sa.Column("description", sa.Text, nullable=False),
+        sa.Column("visibility", sa.String(32), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("published_version_id", sa.String(26)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_skills_workspace_id_updated_at", "workspace_id", "updated_at"),
+    )
+    op.create_table(
+        "skill_versions",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("skill_id", sa.String(26), sa.ForeignKey("skills.id"), nullable=False),
+        sa.Column("version_number", sa.Integer, nullable=False),
+        sa.Column("based_on_version_id", sa.String(26)),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("spec", sa.JSON, nullable=False),
+        sa.Column("created_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("published_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("skill_id", "version_number"),
+    )
+    op.create_table(
+        "connectors",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("owner_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
+        sa.Column("provider", sa.String(32), nullable=False),
+        sa.Column("visibility", sa.String(32), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("published_version_id", sa.String(26)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_connectors_workspace_id_updated_at", "workspace_id", "updated_at"),
+    )
+    op.create_table(
+        "connector_versions",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("connector_id", sa.String(26), sa.ForeignKey("connectors.id"), nullable=False),
+        sa.Column("version_number", sa.Integer, nullable=False),
+        sa.Column("based_on_version_id", sa.String(26)),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("spec", sa.JSON, nullable=False),
+        sa.Column("created_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("published_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("connector_id", "version_number"),
+    )
+    op.create_table(
+        "data_sources",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("owner_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
+        sa.Column("provider", sa.String(32), nullable=False),
+        sa.Column("connection_config", sa.JSON, nullable=False),
+        sa.Column("secret_id", sa.String(26), sa.ForeignKey("secrets.id")),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_data_sources_workspace_id_updated_at", "workspace_id", "updated_at"),
+    )
+    op.create_table(
+        "plugins",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("owner_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
+        sa.Column("description", sa.Text, nullable=False),
+        sa.Column("visibility", sa.String(32), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("published_version_id", sa.String(26)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_plugins_workspace_id_updated_at", "workspace_id", "updated_at"),
+    )
+    op.create_table(
+        "plugin_versions",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("plugin_id", sa.String(26), sa.ForeignKey("plugins.id"), nullable=False),
+        sa.Column("version_number", sa.Integer, nullable=False),
+        sa.Column("based_on_version_id", sa.String(26)),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("spec", sa.JSON, nullable=False),
+        sa.Column("created_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("published_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("plugin_id", "version_number"),
+    )
+    op.create_table(
+        "plugin_version_skill_bindings",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column(
+            "plugin_version_id", sa.String(26), sa.ForeignKey("plugin_versions.id"), nullable=False
+        ),
+        sa.Column(
+            "skill_version_id", sa.String(26), sa.ForeignKey("skill_versions.id"), nullable=False
+        ),
+        sa.UniqueConstraint("plugin_version_id", "skill_version_id"),
+    )
+    op.create_table(
+        "plugin_version_tool_bindings",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column(
+            "plugin_version_id", sa.String(26), sa.ForeignKey("plugin_versions.id"), nullable=False
+        ),
+        sa.Column(
+            "connector_version_id",
+            sa.String(26),
+            sa.ForeignKey("connector_versions.id"),
+            nullable=False,
+        ),
+        sa.UniqueConstraint("plugin_version_id", "connector_version_id"),
+    )
+    op.create_table(
+        "plugin_version_resource_bindings",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column(
+            "plugin_version_id", sa.String(26), sa.ForeignKey("plugin_versions.id"), nullable=False
+        ),
+        sa.Column("resource_type", sa.String(32), nullable=False),
+        sa.Column("resource_id", sa.String(26), nullable=False),
+        sa.Column("config", sa.JSON, nullable=False),
+    )
+    op.create_table(
+        "artifacts",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("run_id", sa.String(26), sa.ForeignKey("runs.id"), nullable=False),
+        sa.Column("owner_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("type", sa.String(32), nullable=False),
+        sa.Column("name", sa.String(500), nullable=False),
+        sa.Column("mime_type", sa.String(200), nullable=False),
+        sa.Column("size", sa.Integer, nullable=False),
+        sa.Column("storage_key", sa.String(1000), unique=True),
+        sa.Column("external_url", sa.String(2000)),
+        sa.Column("sha256", sa.String(64)),
+        sa.Column("metadata_json", sa.JSON, nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("parent_artifact_id", sa.String(26)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_artifacts_workspace_id_created_at", "workspace_id", "created_at"),
+    )
 
 
 def downgrade() -> None:
     for table in [
+        "artifacts",
+        "plugin_version_resource_bindings",
+        "plugin_version_tool_bindings",
+        "plugin_version_skill_bindings",
+        "plugin_versions",
+        "plugins",
+        "data_sources",
+        "connector_versions",
+        "connectors",
+        "skill_versions",
+        "skills",
+        "secrets",
         "knowledge_chunks",
         "knowledge_documents",
         "knowledge_bases",

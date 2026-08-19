@@ -11,6 +11,7 @@ dependencies = [
   "alembic>=1.15,<2",
   "argon2-cffi>=23.1,<26",
   "asyncmy>=0.2.10,<1",
+  "cryptography>=44,<47",
   "elasticsearch[async]>=8.14,<9",
   "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
