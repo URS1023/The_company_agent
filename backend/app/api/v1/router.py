@@ -9,6 +9,7 @@ from backend.app.api.v1.endpoints import (
     files,
     health,
     knowledge,
+    rendering,
     runs,
     system,
 )
@@ -24,5 +25,6 @@ router.include_router(files.router)
 router.include_router(knowledge.router)
 router.include_router(capabilities.router)
 router.include_router(artifacts.router)
+router.include_router(rendering.router)
 
 __all__ = ["router"]
