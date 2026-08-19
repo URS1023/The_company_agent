@@ -35,7 +35,7 @@
 ```text
 Python 3.12 compile      passed
 Ruff                     passed
-Pytest                   43 passed
+Pytest                   46 passed
 Ruff                     passed
 Alembic SQL generation   passed (`0002_runtime_trace`)
 Next ESLint              passed
@@ -46,7 +46,7 @@ Redis PING               PONG
 Elasticsearch info       8.14.3
 Elasticsearch kNN        random index create/search/delete passed
 Redis Streams            random stream/group/read/ack/delete passed
-Playwright E2E           12 passed (Chromium + mobile Chromium, serialized SQLite server)
+Playwright E2E           14 passed (Chromium + mobile Chromium, serialized SQLite server)
 ```
 
 ## 尚未执行
