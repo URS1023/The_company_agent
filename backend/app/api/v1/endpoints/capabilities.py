@@ -548,7 +548,7 @@ async def create_connector(
     user, _, _, membership = await current_user_context(request, db)
     if membership.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
-    connector_spec = dict(payload.spec)
+    connector_spec = _safe_spec(dict(payload.spec))
     if (
         payload.provider == "mcp"
         and connector_spec.get("endpoint")
@@ -631,7 +631,9 @@ async def create_connector(
         metadata={"provider": connector.provider},
     )
     await db.commit()
-    return _connector(connector)
+    response = _connector(connector)
+    response.draft_version_id = version.id
+    return response
 
 
 @router.post("/connectors/preview", response_model=ConnectorBuilderResponse)
@@ -1007,7 +1009,20 @@ async def list_connectors(
             Connector.status == "active",
         )
     )
-    return [_connector(row) for row in rows]
+    responses: list[ConnectorResponse] = []
+    for row in rows:
+        response = _connector(row)
+        draft = await db.scalar(
+            select(ConnectorVersion.id)
+            .where(
+                ConnectorVersion.connector_id == row.id,
+                ConnectorVersion.status == "draft",
+            )
+            .order_by(ConnectorVersion.version_number.desc())
+        )
+        response.draft_version_id = draft
+        responses.append(response)
+    return responses
 
 
 @router.get("/connectors/{connector_id}/tools", response_model=list[ToolResponse])
@@ -1234,6 +1249,22 @@ async def publish_connector_version(
     version.published_at = utc_now()
     connector.published_version_id = version.id
     connector.updated_at = utc_now()
+    bound_tool_bindings = list(
+        await db.scalars(
+            select(ConnectorToolBinding).where(
+                ConnectorToolBinding.connector_version_id == version.id
+            )
+        )
+    )
+    for binding in bound_tool_bindings:
+        tool_version = await db.get(ToolVersion, binding.tool_version_id)
+        tool = await db.get(Tool, tool_version.tool_id) if tool_version else None
+        if tool_version:
+            tool_version.status = "published"
+            tool_version.published_at = utc_now()
+        if tool:
+            tool.published_version_id = tool_version.id
+            tool.updated_at = utc_now()
     await record_audit(
         db,
         workspace_id=membership.workspace_id,

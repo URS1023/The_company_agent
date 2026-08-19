@@ -164,6 +164,8 @@ def test_connector_publish_requires_admin_and_keeps_spec(client, db_session, adm
     published = client.post(f"/api/v1/connector-versions/{version.id}/publish")
     assert published.status_code == 200
     assert published.json()["spec"]["method"] == "GET"
+    published_tool = asyncio.get_event_loop().run_until_complete(read_tool_version())
+    assert published_tool.status == "published"
     next_version = client.post(
         f"/api/v1/connectors/{connector_id}/versions",
         json={"spec": {"method": "GET", "tools": [{"name": "health_v2", "description": "v2"}]}},
@@ -215,6 +217,16 @@ def test_data_source_rejects_inline_credentials_and_accepts_secret_reference(
     )
     assert tool_call.status_code == 422
     assert client.delete(f"/api/v1/data-sources/{source_id}").status_code == 204
+    postgres = client.post(
+        "/api/v1/data-sources",
+        json={
+            "name": "Postgres Finance",
+            "provider": "postgresql",
+            "connection_config": {"host": "127.0.0.1", "port": "5432", "database": "demo"},
+            "secret_id": secret.json()["id"],
+        },
+    )
+    assert postgres.status_code == 201
 
 
 def test_capability_versions_share_and_plugin_run_are_workspace_scoped(

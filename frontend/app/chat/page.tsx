@@ -11,6 +11,7 @@ type Plugin = { id: string; name: string; published_version_id: string | null };
 type KnowledgeBase = { id: string; name: string; status: string };
 type DataSource = { id: string; name: string; provider: string; status: string };
 type SelectedFile = { id: string; name: string; size: number };
+type CapabilityProposal = { capability_type: "skill" | "plugin"; name: string; reason: string; spec: Record<string, unknown> };
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
@@ -28,6 +29,8 @@ export default function ChatPage() {
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [activities, setActivities] = useState<string[]>([]);
+  const [proposal, setProposal] = useState<CapabilityProposal | null>(null);
+  const [proposalSaved, setProposalSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -61,6 +64,8 @@ export default function ChatPage() {
     setRunning(true);
     setError("");
     setActivities([]);
+    setProposal(null);
+    setProposalSaved(false);
     try {
       let activeConversationId = conversationId;
       if (!activeConversationId) {
@@ -119,6 +124,7 @@ export default function ChatPage() {
           setRunning(false);
         }
         if (data.event === "run.completed") {
+          void apiJson<CapabilityProposal>(`/api/v1/runs/${run.id}/capability-proposals`).then(setProposal).catch(() => setProposal(null));
           setActivities((current) => [...current, "任务已完成"]);
           source.close();
           setRunning(false);
@@ -135,6 +141,19 @@ export default function ChatPage() {
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : "发送失败");
       setRunning(false);
+    }
+  }
+
+  async function saveCapabilityDraft() {
+    if (!lastRunId || !proposal) return;
+    try {
+      await apiJson(`/api/v1/runs/${lastRunId}/capability-drafts`, {
+        method: "POST",
+        body: JSON.stringify({ capability_type: proposal.capability_type })
+      });
+      setProposalSaved(true);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "保存 Draft 失败");
     }
   }
 
@@ -180,6 +199,7 @@ export default function ChatPage() {
             ))
           )}
           {activities.length ? <div className="execution-timeline" aria-live="polite"><span className="rail-kicker">执行进度</span>{activities.slice(-6).map((activity, index) => <span key={`${activity}-${index}`}>{activity}</span>)}</div> : null}
+          {proposal ? <section className="capability-card capability-proposal"><span className="capability-label">可复用能力建议 · {proposal.capability_type}</span><h2>{proposal.name}</h2><p>{proposal.reason}</p>{proposalSaved ? <p role="status">已保存为 Draft，可在能力管理中继续测试和发布。</p> : <button type="button" onClick={() => void saveCapabilityDraft()}>保存为 Draft</button>}</section> : null}
           {error ? <p className="form-error inline-error" role="alert">{error}</p> : null}
         </section>
         <form className="composer-wrap" onSubmit={submit}>

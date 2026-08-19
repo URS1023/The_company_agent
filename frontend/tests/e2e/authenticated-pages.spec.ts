@@ -38,6 +38,8 @@ test("admin can create a member, upload a file, and create a knowledge base", as
 
   await page.goto("/admin/models");
   await expect(page.getByRole("heading", { name: "模型配置" })).toBeVisible();
+  await page.goto("/admin/connectors");
+  await expect(page.getByRole("heading", { name: "企业连接" })).toBeVisible();
   await page.goto("/admin/audit");
   await expect(page.getByRole("heading", { name: "审计日志" })).toBeVisible();
   await page.goto("/admin/secrets");

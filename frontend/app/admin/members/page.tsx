@@ -43,7 +43,7 @@ export default function MembersPage() {
 
   return (
     <main className="management-shell">
-      <header className="management-header"><div><p className="eyebrow">WORKSPACE ADMIN</p><h1>成员与权限</h1><p className="muted">账号由管理员创建；密码只在创建或重置时显示一次。</p></div><div className="row-actions"><a className="secondary-button" href="/admin/secrets">Secret</a><a className="secondary-button" href="/admin/models">模型</a><a className="secondary-button" href="/admin/audit">审计</a><a className="secondary-button" href="/chat">返回 Chat</a></div></header>
+      <header className="management-header"><div><p className="eyebrow">WORKSPACE ADMIN</p><h1>成员与权限</h1><p className="muted">账号由管理员创建；密码只在创建或重置时显示一次。</p></div><div className="row-actions"><a className="secondary-button" href="/admin/connectors">连接</a><a className="secondary-button" href="/admin/secrets">Secret</a><a className="secondary-button" href="/admin/models">模型</a><a className="secondary-button" href="/admin/audit">审计</a><a className="secondary-button" href="/chat">返回 Chat</a></div></header>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {newPassword ? <pre className="one-time-secret" role="status">{newPassword}</pre> : null}
       <section className="management-grid">

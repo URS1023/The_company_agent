@@ -91,8 +91,8 @@ async def _oauth_client_credentials_token(
 
 async def test_database_connection(source: DataSource, secret: SecretRecord | None) -> dict:
     config = source.connection_config or {}
-    if source.provider != "mysql":
-        raise ConnectorTestError("native-dev 当前只启用 MySQL DataSource 测试")
+    if source.provider not in {"mysql", "postgresql"}:
+        raise ConnectorTestError(f"不支持的 DataSource Provider: {source.provider}")
     if not secret:
         raise ConnectorTestError("DataSource 缺少 Secret")
     values = SecretManager().decrypt(secret.nonce, secret.ciphertext)
