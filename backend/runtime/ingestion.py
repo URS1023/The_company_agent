@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import socket
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -18,34 +17,11 @@ from backend.app.core.security import utc_now
 from backend.app.core.storage import LocalFileStorage
 from backend.app.models.files import FileAsset
 from backend.app.models.knowledge import KnowledgeChunk, KnowledgeDocument
+from backend.app.processors.documents import chunk_text, parse_document
 from backend.app.providers.compatible import siliconflow_client
 from backend.app.providers.elastic_vector import ElasticsearchVectorStore
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_text(file_asset: FileAsset, content: bytes) -> str:
-    suffix = Path(file_asset.name).suffix.lower()
-    if suffix not in {".txt", ".md", ".markdown", ".csv", ".json", ".tsv"}:
-        raise ValueError(f"当前 native parser 暂不支持 {suffix or file_asset.mime_type}")
-    return content.decode("utf-8", errors="replace")
-
-
-def _chunk_text(text: str, target_chars: int = 3600, overlap_chars: int = 400) -> list[str]:
-    cleaned = "\n".join(line.rstrip() for line in text.splitlines()).strip()
-    if not cleaned:
-        return []
-    chunks: list[str] = []
-    start = 0
-    while start < len(cleaned):
-        end = min(len(cleaned), start + target_chars)
-        chunk = cleaned[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end >= len(cleaned):
-            break
-        start = max(start + 1, end - overlap_chars)
-    return chunks
 
 
 async def ingest_document(document_id: str) -> None:
@@ -62,15 +38,15 @@ async def ingest_document(document_id: str) -> None:
             return
         try:
             raw = LocalFileStorage().get_bytes(file_asset.storage_key)
-            text = _extract_text(file_asset, raw)
-            chunks = _chunk_text(text)
+            parsed = parse_document(raw, file_asset.name, file_asset.mime_type)
+            chunks = chunk_text(parsed.text)
             if not chunks:
                 document.status = "failed"
                 document.error_summary = "文件没有可索引文本"
                 document.updated_at = utc_now()
                 await db.commit()
                 return
-            for ordinal, chunk_text in enumerate(chunks):
+            for ordinal, chunk_value in enumerate(chunks):
                 db.add(
                     KnowledgeChunk(
                         id=new_id(),
@@ -78,7 +54,7 @@ async def ingest_document(document_id: str) -> None:
                         knowledge_base_id=document.knowledge_base_id,
                         document_id=document.id,
                         ordinal=ordinal,
-                        text=chunk_text,
+                        text=chunk_value,
                         location={"ordinal": ordinal},
                         embedding_status="pending",
                         created_at=utc_now(),
