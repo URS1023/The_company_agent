@@ -156,10 +156,80 @@ def upgrade() -> None:
         sa.Column("published_at", sa.DateTime(timezone=True)),
         sa.Index("ix_outbox_events_unpublished", "published_at", "created_at"),
     )
+    op.create_table(
+        "files",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("owner_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("name", sa.String(500), nullable=False),
+        sa.Column("mime_type", sa.String(200), nullable=False),
+        sa.Column("size", sa.Integer, nullable=False),
+        sa.Column("storage_key", sa.String(1000), nullable=False),
+        sa.Column("sha256", sa.String(64), nullable=False),
+        sa.Column("source_type", sa.String(32), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("error_summary", sa.Text),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("deleted_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("storage_key"),
+        sa.Index("ix_files_workspace_id_created_at", "workspace_id", "created_at"),
+    )
+    op.create_table(
+        "knowledge_bases",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column("owner_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
+        sa.Column("description", sa.Text, nullable=False),
+        sa.Column("visibility", sa.String(32), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_knowledge_bases_workspace_id_created_at", "workspace_id", "created_at"),
+    )
+    op.create_table(
+        "knowledge_documents",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column(
+            "knowledge_base_id", sa.String(26), sa.ForeignKey("knowledge_bases.id"), nullable=False
+        ),
+        sa.Column("file_id", sa.String(26), sa.ForeignKey("files.id"), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("parser_version", sa.String(64), nullable=False),
+        sa.Column("error_summary", sa.Text),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint("knowledge_base_id", "file_id"),
+    )
+    op.create_table(
+        "knowledge_chunks",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("workspace_id", sa.String(26), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column(
+            "knowledge_base_id", sa.String(26), sa.ForeignKey("knowledge_bases.id"), nullable=False
+        ),
+        sa.Column(
+            "document_id", sa.String(26), sa.ForeignKey("knowledge_documents.id"), nullable=False
+        ),
+        sa.Column("ordinal", sa.Integer, nullable=False),
+        sa.Column("text", sa.Text, nullable=False),
+        sa.Column("location", sa.JSON, nullable=False),
+        sa.Column("embedding_status", sa.String(32), nullable=False),
+        sa.Column("embedding_model", sa.String(200)),
+        sa.Column("embedding_dimensions", sa.Integer),
+        sa.Column("elasticsearch_document_id", sa.String(200)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Index("ix_knowledge_chunks_document_id_ordinal", "document_id", "ordinal"),
+    )
 
 
 def downgrade() -> None:
     for table in [
+        "knowledge_chunks",
+        "knowledge_documents",
+        "knowledge_bases",
+        "files",
         "outbox_events",
         "run_events",
         "runs",
