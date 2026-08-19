@@ -40,6 +40,21 @@
 .venv/Scripts/python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
+另开 PowerShell 窗口启动原生 Worker：
+
+```powershell
+.venv/Scripts/company-agent-worker.exe relay
+.venv/Scripts/company-agent-worker.exe agent
+.venv/Scripts/company-agent-ingest.exe
+```
+
+数据库迁移和首个管理员创建需要先确认 `.env.local` 中的 MySQL 连接可用：
+
+```powershell
+.venv/Scripts/alembic.exe upgrade head
+.venv/Scripts/company-agent-bootstrap.exe --username workspace-admin
+```
+
 启动前端：
 
 ```powershell

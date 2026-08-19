@@ -3,26 +3,85 @@
 import { FormEvent, useState } from "react";
 
 type Message = { role: "user" | "assistant"; content: string };
+type RunEvent = { event?: string; payload?: { text?: string }; error?: string };
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [running, setRunning] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = input.trim();
     if (!value || running) return;
     setMessages((current) => [...current, { role: "user", content: value }]);
     setInput("");
     setRunning(true);
-    window.setTimeout(() => {
-      setMessages((current) => [
-        ...current,
-        { role: "assistant", content: "工作台骨架已就绪。下一步会接入真实 Run、知识库和模型 Provider。" }
-      ]);
+    setError("");
+    try {
+      let activeConversationId = conversationId;
+      if (!activeConversationId) {
+        const conversationResponse = await fetch("/api/v1/conversations", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "新对话" })
+        });
+        if (!conversationResponse.ok) throw new Error("创建对话失败，请先登录工作区");
+        const conversation = await conversationResponse.json();
+        activeConversationId = conversation.id;
+        setConversationId(activeConversationId);
+      }
+      const runResponse = await fetch(`/api/v1/runs/conversations/${activeConversationId}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: value })
+      });
+      if (!runResponse.ok) throw new Error("Run 创建失败，请检查登录状态和服务状态");
+      const run = await runResponse.json();
+      const source = new EventSource(`/api/v1/runs/${run.id}/events`);
+      let assistantStarted = false;
+      const appendAssistant = (text: string) => {
+        if (!text) return;
+        setMessages((current) => {
+          if (!assistantStarted) {
+            assistantStarted = true;
+            return [...current, { role: "assistant", content: text }];
+          }
+          const next = [...current];
+          const last = next[next.length - 1];
+          if (last?.role === "assistant") next[next.length - 1] = { ...last, content: last.content + text };
+          return next;
+        });
+      };
+      const handleEvent = (event: MessageEvent<string>) => {
+        const data = JSON.parse(event.data) as RunEvent;
+        if (data.event === "message.delta") appendAssistant(data.payload?.text ?? "");
+        if (data.event === "run.failed") {
+          source.close();
+          setError(data.error ?? "Run 执行失败");
+          setRunning(false);
+        }
+        if (data.event === "run.completed") {
+          source.close();
+          setRunning(false);
+        }
+      };
+      source.addEventListener("message.delta", handleEvent);
+      source.addEventListener("run.failed", handleEvent);
+      source.addEventListener("run.completed", handleEvent);
+      source.onerror = () => {
+        source.close();
+        setError("事件连接中断；请稍后从 Run Trace 查看后台状态");
+        setRunning(false);
+      };
+    } catch (submissionError) {
+      setError(submissionError instanceof Error ? submissionError.message : "发送失败");
       setRunning(false);
-    }, 300);
+    }
   }
 
   return (
@@ -65,6 +124,7 @@ export default function ChatPage() {
               </article>
             ))
           )}
+          {error ? <p className="form-error inline-error" role="alert">{error}</p> : null}
         </section>
         <form className="composer-wrap" onSubmit={submit}>
           <div className="context-chips"><button type="button">＋ 添加文件</button><button type="button">选择知识库</button><button type="button">使用插件</button></div>
