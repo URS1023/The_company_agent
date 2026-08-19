@@ -91,14 +91,14 @@ export default function ChatPage() {
         <button className="new-chat" onClick={() => setMessages([])}>＋ 新建对话</button>
         <nav aria-label="主导航" className="main-nav">
           <a className="active" href="/chat">对话</a>
-          <a href="#knowledge">知识库</a>
-          <a href="#plugins">插件</a>
-          <a href="#files">文件</a>
-          <a href="#sources">数据源</a>
+          <a href="/knowledge">知识库</a>
+          <a href="/plugins">插件</a>
+          <a href="/files">文件</a>
+          <a href="/data-sources">数据源</a>
         </nav>
         <div className="sidebar-spacer" />
         <div className="workspace-chip"><span className="status-dot" /> 默认工作区</div>
-        <a className="sidebar-user" href="/login">管理员 · 设置</a>
+        <a className="sidebar-user" href="/admin/members">管理员 · 设置</a>
       </aside>
       <main className="chat-main">
         <header className="chat-header">

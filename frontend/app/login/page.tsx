@@ -22,7 +22,8 @@ export default function LoginPage() {
         body: JSON.stringify({ username, password })
       });
       if (!response.ok) throw new Error("账号或密码不正确");
-      router.push("/chat");
+      const result = await response.json() as { requires_password_change?: boolean };
+      router.push(result.requires_password_change ? "/first-login/password" : "/chat");
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : "登录失败");
     } finally {
