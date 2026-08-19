@@ -20,14 +20,19 @@
 - Knowledge Base、Knowledge Document、Knowledge Chunk 和显式文件入库边界。
 - SiliconFlow BGE-M3 Embedding → Elasticsearch `dense_vector`/kNN 适配。
 - Chat 页面、登录页面、真实 Run/SSE 调用骨架和证据轨道视觉元素。
-- DOCX/PPTX/XLSX 尚处于 Renderer 接口/依赖准备阶段，未完成业务模板渲染。
+- DOCX/PPTX/XLSX Renderer API 已能从 Run 生成并保存 Artifact。
+- Tool Gateway 已覆盖 HTTP/只读 SQL/MCP Mock 安全路径。
+- Connector → Tool → ToolVersion → Plugin Binding 数据模型已建立。
+- Skill/Connector/Plugin 必须先 Test Run，再允许 Publish。
+- 招投标缺口检测、财务分析 Builtin Tool 和 Run Capability Proposal 已加入。
+- 管理员成员列表、停用、重置密码和会话撤销页面已加入。
 
 ## 已验证
 
 ```text
 Python 3.12 compile      passed
 Ruff                     passed
-Pytest                   14 passed
+Pytest                   35 passed
 Alembic heads            0001_native_gate0
 Next ESLint              passed
 Next production build    passed
@@ -35,6 +40,8 @@ Next /, /chat, /login    HTTP 200
 FastAPI /health/live     HTTP 200
 Redis PING               PONG
 Elasticsearch info       8.14.3
+Elasticsearch kNN        random index create/search/delete passed
+Redis Streams            random stream/group/read/ack/delete passed
 ```
 
 ## 尚未执行
