@@ -26,6 +26,25 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Request-ID", "Idempotency-Key", "X-CSRF-Token"],
 )
+
+
+@app.middleware("http")
+async def same_origin_guard(request, call_next):
+    """Reject cross-site state-changing requests while keeping local CLI/API use."""
+
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith(
+        "/api/"
+    ):
+        origin = request.headers.get("origin")
+        if origin and origin.rstrip("/") not in {
+            value.rstrip("/") for value in settings.web_origins
+        }:
+            from starlette.responses import JSONResponse
+
+            return JSONResponse(status_code=403, content={"detail": "Origin 不被允许"})
+    return await call_next(request)
+
+
 app.include_router(v1_router)
 
 

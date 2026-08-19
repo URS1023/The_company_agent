@@ -25,3 +25,13 @@ def test_model_profiles_are_not_exposed_to_unauthenticated_users() -> None:
     client = TestClient(app)
     response = client.get("/api/v1/admin/model-profiles")
     assert response.status_code == 401
+
+
+def test_state_changing_cross_origin_request_is_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/auth/login",
+        headers={"Origin": "https://attacker.example"},
+        json={"username": "admin", "password": "irrelevant"},
+    )
+    assert response.status_code == 403
