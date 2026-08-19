@@ -11,6 +11,7 @@ export default function ChatPage() {
   const [running, setRunning] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [navOpen, setNavOpen] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -86,15 +87,15 @@ export default function ChatPage() {
 
   return (
     <div className="chat-shell">
-      <aside className="sidebar">
+      <aside className={`sidebar${navOpen ? " mobile-open" : ""}`}>
         <div className="brand-lockup"><span className="brand-mark">CA</span><span>企业 AI</span></div>
         <button className="new-chat" onClick={() => setMessages([])}>＋ 新建对话</button>
         <nav aria-label="主导航" className="main-nav">
-          <a className="active" href="/chat">对话</a>
-          <a href="/knowledge">知识库</a>
-          <a href="/plugins">插件</a>
-          <a href="/files">文件</a>
-          <a href="/data-sources">数据源</a>
+          <a className="active" href="/chat" onClick={() => setNavOpen(false)}>对话</a>
+          <a href="/knowledge" onClick={() => setNavOpen(false)}>知识库</a>
+          <a href="/plugins" onClick={() => setNavOpen(false)}>插件</a>
+          <a href="/files" onClick={() => setNavOpen(false)}>文件</a>
+          <a href="/data-sources" onClick={() => setNavOpen(false)}>数据源</a>
         </nav>
         <div className="sidebar-spacer" />
         <div className="workspace-chip"><span className="status-dot" /> 默认工作区</div>
@@ -102,7 +103,7 @@ export default function ChatPage() {
       </aside>
       <main className="chat-main">
         <header className="chat-header">
-          <div><span className="chat-title">新对话</span><span className="chat-context"> · 默认工作区</span></div>
+          <div className="chat-header-left"><button className="mobile-nav-button" type="button" aria-label="打开导航" onClick={() => setNavOpen(true)}>☰</button><div><span className="chat-title">新对话</span><span className="chat-context"> · 默认工作区</span></div></div>
           <button className="details-button" type="button">执行详情</button>
         </header>
         <section className="message-column" aria-live="polite">
