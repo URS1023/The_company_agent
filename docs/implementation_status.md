@@ -13,7 +13,7 @@
 - Agnes Chat Provider、SiliconFlow Vision/Embedding Provider Probe。
 - Admin/Member 本地账号模型、Argon2id 密码、opaque Session。
 - Admin 创建成员和一次性临时密码 API。
-- Organization、Workspace、Conversation、Message、Run、RunEvent、Outbox、RunStep、ToolCall、ModelCall、Citation、Audit 迁移。
+- Organization、Workspace、Conversation、Message、Run、RunEvent、Outbox、RunStep、ToolCall、ModelCall、Citation、ArtifactLineage、ModelProfile、ModelProbe、Audit 迁移。
 - Conversation/Run 创建、幂等键、资源快照、SSE Event Stream、取消/重试/续接和失败诊断。
 - Redis Streams Outbox Relay/Agent Worker/Knowledge Ingestion Worker 基础实现。
 - 临时文件上传、Hash、Workspace/Owner 绑定、删除和列表。
@@ -40,7 +40,7 @@ Ruff                     passed
 Alembic SQL generation   passed (`0002_runtime_trace`)
 Next ESLint              passed
 Next production build    passed
-Next 16 routes           production build passed
+Next 19 routes           production build passed
 FastAPI /health/live     HTTP 200
 Redis PING               PONG
 Elasticsearch info       8.14.3
