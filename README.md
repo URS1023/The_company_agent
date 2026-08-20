@@ -33,10 +33,16 @@ conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent
 ./scripts/setup-native-secrets.cmd
 ```
 
-如果直接运行 `.ps1` 被 Windows 的执行策略拦截，可以使用上面的 `.cmd` 入口；它只对当前 PowerShell 子进程启用 `Bypass`，不会修改系统或用户的持久执行策略。也可以显式执行：
+如果直接运行 `.ps1` 被 Windows 的执行策略拦截，可以使用上面的 `.cmd` 入口；它只对当前 PowerShell 子进程启用 `Bypass`，不会修改系统或用户的持久执行策略。已有 `.env.local` 时，脚本会直接复用现有配置，不再要求重新输入；只有明确传入 `-ForceReplace` 才会重新录入 Secret。也可以显式执行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-native-secrets.ps1
+```
+
+需要主动替换本地配置时才使用：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-native-secrets.ps1 -ForceReplace
 ```
 
 脚本会在本地交互读取 MySQL 密码和可选模型 Key，写入被 Git 忽略的 `.env.local`；不会在终端回显 Secret。没有 `.env.local` 时，Provider Probe 只做配置检查，不会调用外部模型。

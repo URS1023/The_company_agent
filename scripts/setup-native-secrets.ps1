@@ -4,7 +4,8 @@ param(
     # any shared or production deployment.
     [string]$MysqlUser = "root",
     [string]$MysqlDatabase = "company_agent",
-    [switch]$SkipModelKeys
+    [switch]$SkipModelKeys,
+    [switch]$ForceReplace
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,11 @@ $workspaceRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $workspaceRoot ".env.local"
 
 if (Test-Path -LiteralPath $envPath) {
+    if (-not $ForceReplace) {
+        Write-Output ".env.local already exists; keeping the existing local configuration."
+        Write-Output "Use -ForceReplace only when you intentionally want to re-enter local secrets."
+        exit 0
+    }
     $confirm = Read-Host ".env.local already exists. Replace it? (type REPLACE)"
     if ($confirm -cne "REPLACE") {
         Write-Output "Cancelled without changing .env.local."
