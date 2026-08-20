@@ -1,5 +1,8 @@
 param(
-    [string]$MysqlUser = "company_agent_app",
+    # The current local development setup intentionally uses MySQL root at
+    # the user's request. Replace this with a least-privilege account before
+    # any shared or production deployment.
+    [string]$MysqlUser = "root",
     [string]$MysqlDatabase = "company_agent",
     [switch]$SkipModelKeys
 )

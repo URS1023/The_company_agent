@@ -20,7 +20,7 @@ native-dev 只开放仓库内经过测试的确定性分析器和受限的 `pyth
 
 当前分支不要求 Docker。首次配置本地密钥时，在 PowerShell 执行：
 
-本项目的原生脚本会优先使用 Conda 环境 `E:\Environment_f\conda_envs\company-agent`；也可以通过进程环境变量 `COMPANY_AGENT_PYTHON` 指定其他 Python 路径。首次安装 Conda 环境：
+本项目的原生脚本会优先使用 Conda 环境 `E:\Environment_f\conda_envs\company-agent`；也可以通过进程环境变量 `COMPANY_AGENT_PYTHON` 指定其他 Python 路径。当前本地开发按约定统一使用 MySQL `root`，仅适用于这台开发机；上线或共享环境必须换成最小权限账号。首次安装 Conda 环境：
 
 ```powershell
 conda create --prefix E:\Environment_f\conda_envs\company-agent python=3.12 -y
