@@ -15,8 +15,12 @@ from backend.app.providers.compatible import (
     siliconflow_client,
 )
 
+# Keep the smoke probe independent of third-party image hosting. SiliconFlow
+# accepts data URLs, while some public hosts reject the provider's downloader
+# or return a redirect that is not considered a downloadable image URL.
 PUBLIC_TEST_IMAGE = (
-    "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/p-blog/candy.JPG"
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
 
 

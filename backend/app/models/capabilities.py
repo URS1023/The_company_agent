@@ -270,7 +270,7 @@ class Artifact(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(200), nullable=False)
     size: Mapped[int] = mapped_column(nullable=False, default=0)
-    storage_key: Mapped[str | None] = mapped_column(String(1000), unique=True)
+    storage_key: Mapped[str | None] = mapped_column(String(768), unique=True)
     external_url: Mapped[str | None] = mapped_column(String(2000))
     sha256: Mapped[str | None] = mapped_column(String(64))
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

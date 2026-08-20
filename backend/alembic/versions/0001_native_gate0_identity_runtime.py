@@ -166,7 +166,10 @@ def upgrade() -> None:
         sa.Column("name", sa.String(500), nullable=False),
         sa.Column("mime_type", sa.String(200), nullable=False),
         sa.Column("size", sa.Integer, nullable=False),
-        sa.Column("storage_key", sa.String(1000), nullable=False),
+        # Keep the unique utf8mb4 key within MySQL's 3072-byte index limit.
+        # The generated workspace path plus a user filename stays below this
+        # bound while the full content remains in local storage metadata.
+        sa.Column("storage_key", sa.String(768), nullable=False),
         sa.Column("sha256", sa.String(64), nullable=False),
         sa.Column("source_type", sa.String(32), nullable=False),
         sa.Column("status", sa.String(32), nullable=False),
@@ -422,7 +425,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(500), nullable=False),
         sa.Column("mime_type", sa.String(200), nullable=False),
         sa.Column("size", sa.Integer, nullable=False),
-        sa.Column("storage_key", sa.String(1000), unique=True),
+        sa.Column("storage_key", sa.String(768), unique=True),
         sa.Column("external_url", sa.String(2000)),
         sa.Column("sha256", sa.String(64)),
         sa.Column("metadata_json", sa.JSON, nullable=False),

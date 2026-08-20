@@ -55,13 +55,18 @@ async def bootstrap(username: str, display_name: str, password: str) -> None:
             must_change_password=False,
             password_changed_at=now,
         )
+        # These models intentionally keep only scalar foreign-key fields (no
+        # ORM relationships). Flush in dependency order so MySQL enforces the
+        # same order consistently instead of attempting auth_identities before
+        # its users row exists.
+        session.add_all([organization, workspace, user])
+        await session.flush()
+        session.add(identity)
+        await session.flush()
+        session.add(credential)
+        await session.flush()
         session.add_all(
             [
-                organization,
-                workspace,
-                user,
-                identity,
-                credential,
                 OrganizationMember(
                     id=new_id(),
                     organization_id=organization.id,

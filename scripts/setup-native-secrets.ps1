@@ -39,7 +39,12 @@ if (-not $SkipModelKeys) {
 }
 
 $randomBytes = New-Object byte[] 32
-[Security.Cryptography.RandomNumberGenerator]::Fill($randomBytes)
+$randomGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $randomGenerator.GetBytes($randomBytes)
+} finally {
+    $randomGenerator.Dispose()
+}
 $appSecret = [Convert]::ToBase64String($randomBytes)
 $storageRoot = Join-Path $workspaceRoot "runtime-data\storage"
 
@@ -61,6 +66,6 @@ $lines = @(
     "WEB_ORIGINS=http://127.0.0.1:3000,http://localhost:3000"
 )
 
-Set-Content -LiteralPath $envPath -Value $lines -Encoding utf8 -NoNewline
+Set-Content -LiteralPath $envPath -Value ($lines -join [Environment]::NewLine) -Encoding utf8
 Write-Output ".env.local created at $envPath"
 Write-Output "It is ignored by Git; do not paste its contents into chat or commit it."

@@ -19,7 +19,7 @@ class FileAsset(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(200), nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
-    storage_key: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
+    storage_key: Mapped[str] = mapped_column(String(768), nullable=False, unique=True)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="upload")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ready")

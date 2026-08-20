@@ -5,8 +5,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
-$pythonPath = Join-Path $workspaceRoot ".venv/Scripts/python.exe"
-if (-not (Test-Path -LiteralPath $pythonPath)) { throw "Python venv not found: $pythonPath" }
+. (Join-Path $PSScriptRoot "get-native-python.ps1")
+$pythonPath = Get-NativePython -WorkspaceRoot $workspaceRoot
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw "Native Python runtime not found: $pythonPath" }
 Push-Location $workspaceRoot
 try {
     & $pythonPath -m backend.scripts.native_smoke --username $Username --timeout $TimeoutSeconds

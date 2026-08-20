@@ -5,15 +5,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
-$pythonPath = Join-Path $workspaceRoot ".venv/Scripts/python.exe"
+. (Join-Path $PSScriptRoot "get-native-python.ps1")
+$pythonPath = Get-NativePython -WorkspaceRoot $workspaceRoot
 $envPath = Join-Path $workspaceRoot ".env.local"
 
 if (-not (Test-Path -LiteralPath $envPath)) {
     throw "Missing .env.local. Run scripts/setup-native-secrets.ps1 first."
 }
-if (-not (Test-Path -LiteralPath $pythonPath)) {
-    throw "Python venv not found: $pythonPath"
-}
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw "Native Python runtime not found: $pythonPath" }
 
 Push-Location $workspaceRoot
 try {

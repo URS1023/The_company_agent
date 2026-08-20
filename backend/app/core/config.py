@@ -15,6 +15,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        # Parse comma-separated local environment values in field validators.
+        # Pydantic Settings otherwise attempts JSON decoding before
+        # ``parse_origins`` can handle the documented ``a,b`` format.
+        enable_decoding=False,
     )
 
     app_env: str = "native-dev"

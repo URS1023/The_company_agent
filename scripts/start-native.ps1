@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
-$pythonPath = Join-Path $workspaceRoot ".venv/Scripts/python.exe"
+. (Join-Path $PSScriptRoot "get-native-python.ps1")
+$pythonPath = Get-NativePython -WorkspaceRoot $workspaceRoot
 $nodeNpm = "E:/Environment_f/nvm_f/v22.13.0/npm.cmd"
 $runtimeRoot = Join-Path $workspaceRoot "runtime-data"
 $pidPath = Join-Path $runtimeRoot "native-pids.json"
@@ -8,7 +9,7 @@ $pidPath = Join-Path $runtimeRoot "native-pids.json"
 if (-not (Test-Path -LiteralPath (Join-Path $workspaceRoot ".env.local"))) {
     throw "Missing .env.local. Run scripts/setup-native-secrets.ps1 first."
 }
-if (-not (Test-Path -LiteralPath $pythonPath)) { throw "Python venv not found: $pythonPath" }
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw "Native Python runtime not found: $pythonPath" }
 $null = New-Item -ItemType Directory -Path $runtimeRoot -Force
 
 if (Test-Path -LiteralPath $pidPath) {

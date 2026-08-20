@@ -7,7 +7,7 @@
 ## 已完成
 
 - GitHub 远程已配置，开发分支已推送。
-- 原生 Windows 开发骨架：FastAPI、Next.js、Python 3.12 venv、Node 22。
+- 原生 Windows 开发骨架：FastAPI、Next.js、Conda Python 3.12、Node 22。
 - `.env.example` 和安全的 PowerShell Secret 配置脚本。
 - MySQL/Redis/Elasticsearch/LocalFileStorage 适配接口。
 - Agnes Chat Provider、SiliconFlow Vision/Embedding Provider Probe。
@@ -35,13 +35,19 @@
 ```text
 Python 3.12 compile      passed
 Ruff                     passed
-Pytest                   65 passed
+Pytest                   66 passed
 Ruff                     passed
 Alembic SQL generation   passed (`0002_runtime_trace`)
 Next ESLint              passed
 Next production build    passed
 Next 19 routes           production build passed
-FastAPI /health/live     HTTP 200
+FastAPI /api/v1/health/live HTTP 200
+FastAPI /api/v1/health/ready HTTP 200 (MySQL/Redis/Elasticsearch)
+MySQL migration          `alembic upgrade head` passed on local MySQL 8
+Agnes Chat Probe         live passed (`agnes-2.5-flash`)
+SiliconFlow Vision Probe live passed (`Qwen/Qwen3.5-4B`)
+SiliconFlow Embedding    live passed (`BAAI/bge-m3`, 1024 dimensions)
+Native authenticated     smoke passed (login, two demos, file/KB/Run/artifact)
 Redis PING               PONG
 Elasticsearch info       8.14.3
 Elasticsearch kNN        random index create/search/delete passed
@@ -51,28 +57,28 @@ Playwright E2E           14 passed (Chromium + mobile Chromium, serialized SQLit
 
 ## 尚未执行
 
-- 没有执行真实 MySQL 上的 `alembic upgrade head`，因为 `.env.local` 尚未由用户通过本地安全脚本配置；已通过 `--sql` 生成并检查两段迁移。
-- 没有使用聊天中出现的 Agnes/SiliconFlow Key 发起模型请求。
-- 没有把聊天中的 MySQL 密码写入任何文件或命令。
 - 没有修改现有 MySQL、Redis、Elasticsearch 服务配置。
+- 尚未把所有真实 DataSource（MySQL/PostgreSQL）权限拒绝分支逐项录入独立验收脚本；代码级 Mock/SQLite/HTTP/MCP 路径已通过。
 - native-dev 只开放仓库内经过测试的确定性分析器和受限 `python.safe` 数据变换；任意 Python、文件/网络访问和普通用户 stdio MCP 仍保持关闭，需安全发布阶段隔离运行时后开启。
 
 ## 下一步
 
-用户在本机执行：
+当前本机已完成真实联调；如果在另一台机器重现，先创建 Conda 环境：
 
 ```powershell
+conda create --prefix E:\Environment_f\conda_envs\company-agent python=3.12 -y
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m pip install -e ".[files,dev]"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-native-secrets.ps1
 ```
 
 然后再运行：
 
 ```powershell
-.venv/Scripts/alembic.exe upgrade head
-.venv/Scripts/company-agent-bootstrap.exe --username workspace-admin
-.venv/Scripts/company-agent-probe.exe agnes --live
-.venv/Scripts/company-agent-probe.exe siliconflow-vision --live
-.venv/Scripts/company-agent-probe.exe siliconflow-embedding --live
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m alembic upgrade head
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m backend.scripts.bootstrap_admin --username workspace-admin
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m backend.scripts.provider_probe agnes --live
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m backend.scripts.provider_probe siliconflow-vision --live
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m backend.scripts.provider_probe siliconflow-embedding --live
 ```
 
 这些命令会真正验证数据库权限、模型 Key、图片输入和 BGE-M3 向量维度；执行前应将聊天中出现过的测试 Key 轮换为新的测试 Key。

@@ -20,6 +20,15 @@ native-dev 只开放仓库内经过测试的确定性分析器和受限的 `pyth
 
 当前分支不要求 Docker。首次配置本地密钥时，在 PowerShell 执行：
 
+本项目的原生脚本会优先使用 Conda 环境 `E:\Environment_f\conda_envs\company-agent`；也可以通过进程环境变量 `COMPANY_AGENT_PYTHON` 指定其他 Python 路径。首次安装 Conda 环境：
+
+```powershell
+conda create --prefix E:\Environment_f\conda_envs\company-agent python=3.12 -y
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m pip install -e ".[files,dev]"
+```
+
+安装完成后，后续不需要手动激活 Conda；仓库提供的 `.cmd` 入口会自动选择该环境。
+
 ```powershell
 ./scripts/setup-native-secrets.cmd
 ```
@@ -35,9 +44,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-native-s
 基础检查：
 
 ```powershell
-.venv/Scripts/ruff.exe check backend tests
-.venv/Scripts/pytest.exe
-.venv/Scripts/alembic.exe heads
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent ruff check backend tests
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m pytest
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m alembic heads
 ```
 
 浏览器回归（会启动临时 SQLite API，不会触碰本地 MySQL）：
@@ -52,15 +61,15 @@ cd frontend
 启动 API：
 
 ```powershell
-.venv/Scripts/python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
 另开 PowerShell 窗口启动原生 Worker：
 
 ```powershell
-.venv/Scripts/company-agent-worker.exe relay
-.venv/Scripts/company-agent-worker.exe agent
-.venv/Scripts/company-agent-ingest.exe
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m backend.runtime.worker relay
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m backend.runtime.worker agent
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m backend.runtime.ingestion
 ```
 
 配置好 `.env.local` 后，也可以由脚本统一启动/停止本项目自己的进程：
@@ -82,8 +91,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-native.ps
 数据库迁移和首个管理员创建需要先确认 `.env.local` 中的 MySQL 连接可用：
 
 ```powershell
-.venv/Scripts/alembic.exe upgrade head
-.venv/Scripts/company-agent-bootstrap.exe --username workspace-admin
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m alembic upgrade head
+conda run --no-capture-output --prefix E:\Environment_f\conda_envs\company-agent python -m backend.scripts.bootstrap_admin --username workspace-admin
 ```
 
 也可以用一次性验证脚本确保配置的 MySQL 数据库存在、执行迁移、初始化管理员和完成三个 Provider 的真实 Probe（管理员密码仍以交互方式读取）：
