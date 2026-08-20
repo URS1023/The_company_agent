@@ -48,6 +48,8 @@ Agnes Chat Probe         live passed (`agnes-2.5-flash`)
 SiliconFlow Vision Probe live passed (`Qwen/Qwen3.5-4B`)
 SiliconFlow Embedding    live passed (`BAAI/bge-m3`, 1024 dimensions)
 Native authenticated     smoke passed (login, two demos, file/KB/Run/artifact)
+Native run control       smoke passed (idempotency, cancel, retry, continue, SSE)
+Native MySQL DataSource  smoke passed (connection, describe/list/query, read-only rejection)
 Redis PING               PONG
 Elasticsearch info       8.14.3
 Elasticsearch kNN        random index create/search/delete passed

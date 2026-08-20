@@ -16,7 +16,7 @@
 | Plugin 创建/修改/使用 | Skill/Tool/Resource Binding、Plugin Run、Chat 选择、Tool Loop | `tests/test_capabilities_api.py`, `tests/test_worker_tool_loop.py`, Playwright |
 | Plugin 复制/分享/回滚 | 复制时复制绑定、Workspace 分享、历史版本回滚 | `tests/test_capabilities_api.py` |
 | Artifact | DOCX/PPTX/XLSX/PDF Renderer、Preview、Download、Use-as-input、Lineage | `tests/test_processors.py`, `tests/test_artifacts_api.py`, `tests/test_artifact_service.py` |
-| Run 状态/Trace | Run、RunStep、ToolCall、ModelCall、Event、SSE Cursor、Cancel/Retry/Continue | `tests/test_run_api.py`, `tests/test_worker_execution.py` |
+| Run 状态/Trace | Run、RunStep、ToolCall、ModelCall、Event、SSE Cursor、Cancel/Retry/Continue | `tests/test_run_api.py`, `tests/test_worker_execution.py`；本机 control smoke 覆盖幂等、取消、重试、续接和 SSE |
 | Workspace/权限 | Organization/Workspace、Admin/Member、Owner/Workspace Visibility、Binding IDOR 校验 | `tests/test_auth_api.py`, `tests/test_capabilities_api.py` |
 | Secret | AES-GCM 密文、禁止内嵌凭据、轮换、撤销、只返回元数据 | `tests/test_capabilities_api.py`, `tests/test_security.py` |
 | Model Gateway/Profile | Agnes reasoning、SiliconFlow Vision/Embedding、Profile/Probe 记录和重试 | `tests/test_providers.py`, `tests/test_health_and_config.py`；三项真实 Probe 通过 |
@@ -29,7 +29,7 @@
 代码、本地测试和本机主要真实联调已经通过；仍需单独补齐以下细粒度证据后，才能把所有 V1 子项都标记为完成：
 
 1. PostgreSQL DataSource 的真实连接路径（当前本机未部署 PostgreSQL）。
-2. 原生 Relay、Agent、Ingestion Worker 的逐项重试/取消/续接路径在真实服务上补充证据。
+2. 原生 Relay、Agent、Ingestion Worker 的 PostgreSQL 连接路径（本机未部署 PostgreSQL）。
 
 执行入口：
 
