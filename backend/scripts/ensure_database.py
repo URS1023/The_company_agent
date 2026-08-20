@@ -27,6 +27,15 @@ async def ensure_database(database_name: str | None = None) -> str:
     )
     try:
         async with engine.begin() as connection:
+            existing = await connection.scalar(
+                text(
+                    "SELECT SCHEMA_NAME FROM information_schema.schemata "
+                    "WHERE SCHEMA_NAME = :database_name"
+                ),
+                {"database_name": target},
+            )
+            if existing:
+                return target
             await connection.execute(
                 text(
                     f"CREATE DATABASE IF NOT EXISTS `{target}` "

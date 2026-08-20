@@ -10,7 +10,7 @@
 | 图片/扫描件识别 | SiliconFlow Qwen Vision Base64 路径；未启用时明确失败 | `backend/app/services/context.py`, `backend/runtime/ingestion.py`, `tests/test_providers.py`；真实 Vision Probe 通过 |
 | REST Connector | SSRF 校验、Schema、Secret Auth、OAuth Client Credentials、结果标准化 | `tests/test_tools.py`, `tests/test_capabilities_api.py` |
 | MCP Connector | Streamable HTTP 初始化、工具发现、调用和结果标准化 | `tests/test_tools.py`, `tests/test_capabilities_api.py` |
-| Database Connector | MySQL/PostgreSQL 只读 SQL、Schema/Table/Query Tool | `tests/test_tools.py`, `tests/test_capabilities_api.py`；本地 MySQL 迁移/健康检查通过，真实 DataSource 权限矩阵仍需单独验收 |
+| Database Connector | MySQL/PostgreSQL 只读 SQL、Schema/Table/Query Tool | `tests/test_tools.py`, `tests/test_capabilities_api.py`；本地 MySQL DataSource 连接、describe/list/describe_table/query 与写入拒绝 smoke 通过 |
 | Python Sandbox | Trusted Builtin + 受限 `python.safe`；禁止 import/文件/网络/任意主机代码 | `tests/test_tools.py`, `tests/test_worker_tools.py`, `tests/test_worker_tool_loop.py` |
 | Skill 创建/修改/版本 | Root + Draft/Published Version、Patch 生成 Draft、回滚 Draft、Test Run | `tests/test_capabilities_api.py` |
 | Plugin 创建/修改/使用 | Skill/Tool/Resource Binding、Plugin Run、Chat 选择、Tool Loop | `tests/test_capabilities_api.py`, `tests/test_worker_tool_loop.py`, Playwright |
@@ -28,7 +28,7 @@
 
 代码、本地测试和本机主要真实联调已经通过；仍需单独补齐以下细粒度证据后，才能把所有 V1 子项都标记为完成：
 
-1. 本地 MySQL DataSource 的 `SELECT`、Schema/表描述和权限拒绝路径成功。
+1. PostgreSQL DataSource 的真实连接路径（当前本机未部署 PostgreSQL）。
 2. 原生 Relay、Agent、Ingestion Worker 的逐项重试/取消/续接路径在真实服务上补充证据。
 
 执行入口：
