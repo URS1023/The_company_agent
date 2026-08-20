@@ -21,7 +21,13 @@ native-dev 只开放仓库内经过测试的确定性分析器和受限的 `pyth
 当前分支不要求 Docker。首次配置本地密钥时，在 PowerShell 执行：
 
 ```powershell
-./scripts/setup-native-secrets.ps1
+./scripts/setup-native-secrets.cmd
+```
+
+如果直接运行 `.ps1` 被 Windows 的执行策略拦截，可以使用上面的 `.cmd` 入口；它只对当前 PowerShell 子进程启用 `Bypass`，不会修改系统或用户的持久执行策略。也可以显式执行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-native-secrets.ps1
 ```
 
 脚本会在本地交互读取 MySQL 密码和可选模型 Key，写入被 Git 忽略的 `.env.local`；不会在终端回显 Secret。没有 `.env.local` 时，Provider Probe 只做配置检查，不会调用外部模型。
@@ -60,8 +66,15 @@ cd frontend
 配置好 `.env.local` 后，也可以由脚本统一启动/停止本项目自己的进程：
 
 ```powershell
-./scripts/start-native.ps1
-./scripts/stop-native.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-native.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-native.ps1
+```
+
+或使用不受执行策略影响的入口：
+
+```powershell
+./scripts/start-native.cmd
+./scripts/stop-native.cmd
 ```
 
 脚本不会启动、停止或修改现有 MySQL、Redis、Elasticsearch 服务。
@@ -76,13 +89,25 @@ cd frontend
 也可以用一次性验证脚本确保配置的 MySQL 数据库存在、执行迁移、初始化管理员和完成三个 Provider 的真实 Probe（管理员密码仍以交互方式读取）：
 
 ```powershell
-./scripts/verify-native.ps1 -AdminUsername workspace-admin
+./scripts/verify-native.cmd -AdminUsername workspace-admin
+```
+
+等价的显式命令为：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-native.ps1 -AdminUsername workspace-admin
 ```
 
 启动 API 和原生 Worker 后，可以运行认证冒烟测试：
 
 ```powershell
-./scripts/run-native-smoke.ps1 -Username workspace-admin
+./scripts/run-native-smoke.cmd -Username workspace-admin
+```
+
+等价的显式命令为：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-smoke.ps1 -Username workspace-admin
 ```
 
 脚本只输出 HTTP 状态和 Run 状态，不输出模型回答、文件内容、密码或 API Key。

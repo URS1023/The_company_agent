@@ -62,7 +62,7 @@ Playwright E2E           14 passed (Chromium + mobile Chromium, serialized SQLit
 用户在本机执行：
 
 ```powershell
-./scripts/setup-native-secrets.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-native-secrets.ps1
 ```
 
 然后再运行：
